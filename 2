@@ -1,0 +1,94 @@
+use std::sync::Arc;
+use std::sync::{ RwLock, RwLockReadGuard };
+use std::ops::Deref;
+
+struct StringPile {
+	data: Vec<String>,
+}
+
+impl StringPile {
+	pub fn new() -> StringPile {
+		StringPile {
+			data: Vec::new()
+		}
+	}
+}
+
+#[derive(Debug)]
+pub enum TinyStringError {
+	PoisonedGuard
+}
+
+impl<T> From<std::sync::PoisonError<T>> for TinyStringError {
+	fn from(_error: std::sync::PoisonError<T>) -> TinyStringError {
+		TinyStringError::PoisonedGuard
+	}
+}
+
+#[derive(Clone)]
+pub struct TinyStringCreator {
+	pile: Arc<RwLock<StringPile>>,
+}
+
+impl TinyStringCreator {
+	pub fn new() -> TinyStringCreator {
+		let arc = Arc::new(RwLock::new(StringPile::new()));
+		TinyStringCreator {
+			pile: arc
+		}
+	}
+
+	pub fn create(string: &str) -> Result<std::sync::LockResult<TinyString>, TinyStringError> {
+		let lock = pile.write()?;
+		for (i, element) in lock.data.iter() {
+			if element == string {
+				return TinyString {
+					pile: self.pile.clone(),
+					id: i,
+				};
+			}
+		}
+
+		let id = lock.data.len();
+		lock.data.push(string.to_string());
+
+		TinyString {
+			pile: self.pile.clone(),
+			id: id,
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct TinyString {
+	pile: Arc<RwLock<StringPile>>,
+	id: usize
+}
+
+impl TinyString {
+	pub fn read<'a>(&'a self) -> Result<TinyStringReadGuard<'a>, TinyStringError> {
+		Ok(TinyStringReadGuard {
+			guard: self.pile.read()?,
+			id: self.id
+		})
+	}
+
+	pub fn get_creator(&self) -> TinyStringCreator {
+		TinyStringCreator {
+			pile: self.pile
+		}
+	}
+}
+
+pub struct TinyStringReadGuard<'a> {
+	guard: RwLockReadGuard<'a, StringPile>,
+	id: usize,
+}
+
+impl Deref for TinyStringReadGuard<'_> {
+	type Target = str;
+
+	fn deref<'a>(&'a self) -> &'a Self::Target {
+		&self.guard.data[self.id]
+	}
+}

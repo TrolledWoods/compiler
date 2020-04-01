@@ -1,0 +1,20 @@
+if "bleh blop \"\u1f606\\n\t\\" hi
+
+// An external module is just a "library"
+// that is defined externally. It is going to have
+// some routines that are indexed, and that can be called
+// from the runtime in here!
+// extern io;
+// use io::print;
+// 
+// mult_with_add :: (a: u32, b: u32) -> u32 {
+// 	if b == 0 {
+// 		0
+// 	}else{
+// 		mult_with_add(a, b - 1) + a
+// 	}
+// };
+// 
+// main :: () {
+// 	print(#"{mult_with_add(23, 42)}");
+// };

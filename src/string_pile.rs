@@ -38,6 +38,12 @@ impl TinyStringCreator {
 		}
 	}
 
+    pub fn debug_pile(&self) {
+        for string in self.pile.read().unwrap().data.iter() {
+            println!("{}", string);
+        }
+    }
+
 	/// insert but it panics if the lock was dirty(it's only dirty if another thread panicked,
 	/// so what this does is essentially propagate panics into other threads, which I think
 	/// is completely fine, as I don't want any thread to panic in the first place)

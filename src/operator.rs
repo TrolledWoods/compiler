@@ -1,6 +1,11 @@
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum OpKind {
     NoOp,
+    Assignment,
+    Declaration,
+    Constant,
+    ReturnArrow,
+    Access,
     Add,
     Sub,
     Mul,

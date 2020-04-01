@@ -19,6 +19,7 @@ pub enum LexerErrorKind {
 	UnfinishedEscapeCode,
 	BadEscapeCode,
 	ExpectedChar,
+    ManyDecimalPoints,
 	InvalidHexU32 { end: TextPos },
 	InvalidUnicode(u32),
 	InvalidHexDigit(char),
@@ -53,6 +54,8 @@ pub struct Token {
 pub enum TokenKind {
 	OpeningBracket(BracketKind),
 	ClosingBracket(BracketKind),
+    Terminator,
+    Separator,
 	Identifier(TinyString),
 	Operator { kind: OpKind, is_assignment: bool },
 	Keyword(Keyword),
@@ -76,7 +79,7 @@ enum ReadTokenState {
 }
 
 pub struct Lexer<'a> {
-	source: Peekable<Chars<'a>>,
+	source: Chars<'a>,
 	current_pos: TextPos,
 
 	peeked_tokens: VecDeque<Token>,
@@ -87,7 +90,7 @@ pub struct Lexer<'a> {
 impl Lexer<'_> {
 	pub fn new<'a>(source: &'a str, tiny_string_creator: TinyStringCreator) -> Lexer<'a> {
 		Lexer {
-			source: source.chars().peekable(),
+			source: source.chars(),
 			current_pos: TextPos { line: 0, character: 0 },
 
 			peeked_tokens: VecDeque::new(),
@@ -150,7 +153,10 @@ impl Lexer<'_> {
 	}
 
 	fn peek_char(&mut self) -> Option<char> {
-		self.source.peek().map(|v| *v)
+        // The clone should be cheap, right?
+        // Two pointers we clone, i.e. 128 bits max?
+        // **scared**
+		self.source.clone().next()
 	}
 
 	fn read_possibly_escaped_char(&mut self) -> Result<char, LexerError> {
@@ -224,7 +230,7 @@ impl Lexer<'_> {
 		}
 	}
 
-	fn match_next<T>(&self, mapper: Iterator<Item = (&'static str, T)>) -> Option<T> {
+	fn match_next<'a, T: 'a>(&mut self, mapper: impl Iterator<Item = &'a (&'static str, T)>) -> Option<&'a T> {
 		for (pattern, item) in mapper {
 			if self.is_this_next(pattern) {
 				// Read in the characters we matched on
@@ -239,9 +245,9 @@ impl Lexer<'_> {
 	}
 
 	fn is_this_next(&self, next: &str) -> bool {
-		let own = self.chars().as_str();
+		let own = self.source.as_str();
 		if own.len() >= next.len() {
-			own[0..next.len()] == next
+			&own[0..next.len()] == next
 		}else{
 			false
 		}
@@ -261,31 +267,106 @@ impl Lexer<'_> {
 		}
 
 		match self.peek_char() {
-			Some('/') => {
-				// This is either division or a comment
-				let start = self.current_pos;
-				self.next_char();
-				
-				if self.peek_char() == Some('/') {
-					// It's a comment, so read until the end of the line
-					while let Some(c) = self.next_char() {
-						if c == '\n' {
-							break;
-						}
-					}
+			Some('/') if self.is_this_next("//") => {
+                // It's a comment, so read until the end of the line
+                while let Some(c) = self.next_char() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
 
-					Ok(ReadTokenState::SemanticToken)
-				}else{
-					Ok(ReadTokenState::Token(Token {
-						kind: TokenKind::Operator(OpKind::Div),
-						start: self.current_pos,
-						end: self.current_pos,
-					}))
-				}
+                // A semantic token is just a comment for now.
+                // It's here to reduce recursion(which would be terrible for the stack,
+                // especially if you have like 500 lines of documentation code)
+                Ok(ReadTokenState::SemanticToken)
 			},
+            Some(';') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::Terminator, start, end: start } ))
+            },
+            Some(',') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::Separator, start, end: start } ))
+            },
+            Some('(') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), start, end: start } ))
+            },
+            Some('[') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::OpeningBracket(BracketKind::Brack), start, end: start } ))
+            },
+            Some('{') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::OpeningBracket(BracketKind::Curly), start, end: start } ))
+            },
+            Some(')') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::ClosingBracket(BracketKind::Paren), start, end: start } ))
+            },
+            Some(']') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::ClosingBracket(BracketKind::Brack), start, end: start } ))
+            },
+            Some('}') => {
+                let start = self.current_pos;
+                self.next_char();
+                Ok(ReadTokenState::Token(Token { kind: TokenKind::ClosingBracket(BracketKind::Curly), start, end: start } ))
+            },
+            Some(c) if c.is_digit(10) || c == '.' => {
+                let start = self.current_pos;
+                let mut num: i128 = 0;
+                let mut decimal_point: Option<f64> = None;
+
+                while let Some(c) = self.peek_char() {
+                    if let Some(digit) = c.to_digit(10) {
+                        num *= 10;
+                        num += digit as i128;
+
+                        // If we are to the right of the decimal point,
+                        // increase precision
+                        decimal_point = decimal_point.map(|v| v * 0.1);
+                    }else if c == '.' {
+                        if decimal_point.is_none() {
+                            decimal_point = Some(1.0);
+                        }else {
+                            return Err(LexerError {
+                                kind: LexerErrorKind::ManyDecimalPoints,
+                                pos: start,
+                            });
+                        }
+                    }else {
+                        break;
+                    }
+
+                    self.next_char();
+                }
+
+                if let Some(decimal_point) = decimal_point {
+                    Ok(ReadTokenState::Token(Token {
+                        kind: TokenKind::FloatLiteral(num as f64 / decimal_point),
+                        start: start,
+                        end: self.current_pos,
+                    }))
+                }else{
+                    Ok(ReadTokenState::Token(Token {
+                        kind: TokenKind::IntLiteral(num),
+                        start: start,
+                        end: self.current_pos,
+                    }))
+                }
+            },
 			Some('+') | Some('-') | Some('/') | Some('*') | 
 			Some('%') | Some('^') | Some('&') | Some('=') | 
-			Some('!') | Some('|') => {
+			Some('!') | Some('|') | Some('<') | Some('>') | 
+            Some('~') | Some(':') => {
 				// Operator!
 				let start = self.current_pos;
 
@@ -297,9 +378,14 @@ impl Lexer<'_> {
 					("!=", OpKind::NotEqual),
 					("<=", OpKind::LessEq),
 					(">=", OpKind::GreaterEq),
+                    ("->", OpKind::ReturnArrow),
 					("<", OpKind::Less),
 					(">", OpKind::Greater),
+                    ("&&", OpKind::And),
+                    ("||", OpKind::Or),
 					("!", OpKind::Not),
+                    ("=", OpKind::Assignment),
+                    ("::", OpKind::Constant),
 				];
 
 				const OP_MAP: &[(&str, OpKind)] = &[
@@ -312,18 +398,31 @@ impl Lexer<'_> {
 					("~", OpKind::BitNot),
 					("&", OpKind::BitAnd),
 					("|", OpKind::BitOr),
+                    (":", OpKind::Declaration),
 				];
 
 				if let Some(op) = self.match_next(NON_ASSIGN_OP_MAP.iter()) {
 					Ok(ReadTokenState::Token(Token {
-						kind: TokenKind::Operator { kind: op, is_assignment: false },
+						kind: TokenKind::Operator { kind: *op, is_assignment: false },
 						start: start,
 						end: self.current_pos
 					}))
 				}else if let Some(op) = self.match_next(OP_MAP.iter()) {
 					// See if it's an assignment
-					let is_assignment =
-				}
+					let is_assignment = self.peek_char() == Some('=');
+
+                    // If there was an equal sign, that was part of the operator
+                    if is_assignment { self.next_char(); }
+                    Ok(ReadTokenState::Token(Token {
+                        kind: TokenKind::Operator { kind: *op, is_assignment },
+                        start: start,
+                        end: self.current_pos
+                    }))
+				}else {
+                    // Since all the states that the branch would match have to fit
+                    // in one of the above conditions, this shouldn't happen, ever
+                    unreachable!();
+                }
 			},
 			Some('"') => {
 				fn unclosed_string_literal(start: TextPos, pos: TextPos) -> LexerError {

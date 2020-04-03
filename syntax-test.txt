@@ -5,14 +5,27 @@
 // extern io;
 // use io::print;
 
-mult_with_add :: (a: u32, b: u32) -> u32 {
-	if b == 0 {
-		0
-	}else{
-		mult_with_add(a, b - 1) + a
-	}
+extern main :: () {
+	x := 1;
+	x += 2;
 };
 
-main :: () {
-	print("hello world!" + mult_with_add(20, 10).to_string());
-};
+// //mult_with_add :: (a: u32, b: u32) -> u32 {
+// 	if b == 0 {
+// 		0
+// 	}else{
+// 		mult_with_add(a, b - 1) + a
+// 	}
+// };
+// 
+// // export functions cannot have generics.
+// // That is because normal functions are compiled
+// // for every unique combination of generics supplied
+// // when calling them
+// // (if no generics, then they are generated when called)
+// // These are basically "entry points" for the compilation
+// // of functions and also define the rest of the program
+// // that has to be included in the binary
+// main :: export () {
+// 	println("hello world!");
+// };

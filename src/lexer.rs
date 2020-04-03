@@ -1,9 +1,30 @@
-use crate::string_pile::{ TinyString, TinyStringCreator };
+use crate::string_pile::{ TinyString };
 use crate::operator::OpKind;
 use crate::keyword::Keyword;
 use std::collections::VecDeque;
 use std::str::Chars;
 use std::iter::Peekable;
+
+#[derive(Clone, Debug)]
+pub struct Token {
+	pub kind: TokenKind,
+	pub start: TextPos,
+	pub end: TextPos,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TokenKind {
+	OpeningBracket(BracketKind),
+	ClosingBracket(BracketKind),
+    Terminator,
+    Separator,
+	Identifier(TinyString),
+	Operator { kind: OpKind, is_assignment: bool },
+	Keyword(Keyword),
+	StringLiteral(TinyString),
+	IntLiteral(i128),  // Store literals with the highest precision, as we can always scale down but not scale up later
+	FloatLiteral(f64),
+}
 
 #[derive(Clone, Debug)]
 pub struct LexerError {
@@ -43,27 +64,6 @@ impl std::fmt::Debug for TextPos {
 	}
 }
 
-#[derive(Debug)]
-pub struct Token {
-	pub kind: TokenKind,
-	pub start: TextPos,
-	pub end: TextPos,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum TokenKind {
-	OpeningBracket(BracketKind),
-	ClosingBracket(BracketKind),
-    Terminator,
-    Separator,
-	Identifier(TinyString),
-	Operator { kind: OpKind, is_assignment: bool },
-	Keyword(Keyword),
-	StringLiteral(TinyString),
-	IntLiteral(i128),  // Store literals with the highest precision, as we can always scale down but not scale up later
-	FloatLiteral(f64),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BracketKind {
 	Paren,
@@ -83,30 +83,28 @@ pub struct Lexer<'a> {
 	current_pos: TextPos,
 
 	peeked_tokens: VecDeque<Token>,
-	string_handler: TinyStringCreator,
 	poisoned: bool,
 }
 
 impl Lexer<'_> {
-	pub fn new<'a>(source: &'a str, tiny_string_creator: TinyStringCreator) -> Lexer<'a> {
+	pub fn new<'a>(source: &'a str) -> Lexer<'a> {
 		Lexer {
 			source: source.chars(),
 			current_pos: TextPos { line: 0, character: 0 },
 
 			peeked_tokens: VecDeque::new(),
-			string_handler: tiny_string_creator,
 			poisoned: false,
 		}
 	}
 
-	pub fn peek_token<'a>(&'a mut self, n_tokens_forward: usize) -> Result<Option<&'a Token>, LexerError> {
+	pub fn peek_token(&mut self, n_tokens_forward: usize) -> Result<Option<Token>, LexerError> {
 		if self.poisoned {
 			panic!("Cannot access a lexer after it has thrown an error");
 		}
 
 		// See if we already had the token cached
 		if n_tokens_forward < self.peeked_tokens.len() {
-			return Ok(Some(&self.peeked_tokens[n_tokens_forward]));
+			return Ok(Some(self.peeked_tokens[n_tokens_forward].clone()));
 		}else {
 			// Read in more tokens
 			let mut n_peeked_tokens = self.peeked_tokens.len();
@@ -118,7 +116,7 @@ impl Lexer<'_> {
 						n_peeked_tokens += 1;
 
 						if n_peeked_tokens == n_wanted_tokens {
-							return Ok(Some(&self.peeked_tokens[n_tokens_forward]));
+							return Ok(Some(self.peeked_tokens[n_tokens_forward].clone()));
 						}
 					},
 					Ok(ReadTokenState::SemanticToken) => (),
@@ -323,7 +321,7 @@ impl Lexer<'_> {
             Some(c) if c.is_digit(10) || c == '.' => {
                 let start = self.current_pos;
                 let mut num: i128 = 0;
-                let mut decimal_point: Option<f64> = None;
+                let mut decimal_point: Option<u64> = None;
 
                 while let Some(c) = self.peek_char() {
                     if let Some(digit) = c.to_digit(10) {
@@ -332,10 +330,10 @@ impl Lexer<'_> {
 
                         // If we are to the right of the decimal point,
                         // increase precision
-                        decimal_point = decimal_point.map(|v| v * 0.1);
+                        decimal_point = decimal_point.map(|v| v + 1);
                     }else if c == '.' {
                         if decimal_point.is_none() {
-                            decimal_point = Some(1.0);
+                            decimal_point = Some(0);
                         }else {
                             return Err(LexerError {
                                 kind: LexerErrorKind::ManyDecimalPoints,
@@ -351,7 +349,7 @@ impl Lexer<'_> {
 
                 if let Some(decimal_point) = decimal_point {
                     Ok(ReadTokenState::Token(Token {
-                        kind: TokenKind::FloatLiteral(num as f64 / decimal_point),
+                        kind: TokenKind::FloatLiteral(num as f64 * (0.1f64).powf(decimal_point as f64)),
                         start: start,
                         end: self.current_pos,
                     }))
@@ -445,7 +443,7 @@ impl Lexer<'_> {
 				self.next_char();
 
 				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::StringLiteral(self.string_handler.expect_insert(&string)),
+					kind: TokenKind::StringLiteral(string.into()),
 					start: start,
 					end: self.current_pos
 				}))
@@ -480,10 +478,11 @@ impl Lexer<'_> {
 						"union"		=> TokenKind::Keyword(Keyword::Union),
 						"type"		=> TokenKind::Keyword(Keyword::Type),
 						"enum"		=> TokenKind::Keyword(Keyword::Enum),
+                        "extern"    => TokenKind::Keyword(Keyword::Extern),
 						"use"		=> TokenKind::Keyword(Keyword::Use),
 						"module"	=> TokenKind::Keyword(Keyword::Module),
 						_ => TokenKind::Identifier(
-								self.string_handler.expect_insert(&word)),
+                                word.into()),
 					},
 					start: start,
 					end: self.current_pos,

@@ -13,6 +13,7 @@ pub enum Keyword {
     Union,
     Type,
     Enum,
+    Extern,
 
     // Namespaces
     Use,

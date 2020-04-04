@@ -10,8 +10,7 @@ pub struct FunctionHeader {
     pub return_type: Option<Type>,
 }
 
-pub struct Trait {
-}
+pub struct Trait {}
 
 pub enum PrimitiveKind {
     U8,

@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use std::sync::{ RwLock, RwLockReadGuard };
 use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::{RwLock, RwLockReadGuard};
 
 lazy_static! {
     static ref PILE: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
@@ -26,8 +26,15 @@ impl TinyString {
     pub fn read<'a>(&self) -> TinyStringReadGuard<'a> {
         TinyStringReadGuard {
             guard: read_pile(),
-            id: self.0
+            id: self.0,
         }
+    }
+}
+
+impl std::cmp::PartialEq<&str> for TinyString {
+    fn eq(&self, other: &&str) -> bool {
+        let other: TinyString = (*other).into();
+        *self == other
     }
 }
 
@@ -55,57 +62,57 @@ impl From<&str> for TinyString {
 }
 
 impl std::fmt::Debug for TinyString {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "'{}'{}", &*read_pile()[self.0] as &str, self.0)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "'{}'{}", &*read_pile()[self.0] as &str, self.0)
+    }
 }
 
 impl std::fmt::Display for TinyString {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", &*read_pile()[self.0] as &str)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &*read_pile()[self.0] as &str)
+    }
 }
 
 pub struct TinyStringReadGuard<'a> {
-	guard: RwLockReadGuard<'a, Vec<String>>,
-	id: usize,
+    guard: RwLockReadGuard<'a, Vec<String>>,
+    id: usize,
 }
 
 impl Deref for TinyStringReadGuard<'_> {
-	type Target = str;
+    type Target = str;
 
-	fn deref<'a>(&'a self) -> &'a Self::Target {
-		&self.guard[self.id]
-	}
+    fn deref<'a>(&'a self) -> &'a Self::Target {
+        &self.guard[self.id]
+    }
 }
 
 impl std::fmt::Display for TinyStringReadGuard<'_> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", &*self)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &*self)
+    }
 }
 
 impl std::fmt::Debug for TinyStringReadGuard<'_> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", &*self)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &*self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+    use super::*;
 
-	#[test]
-	fn string_pile_test() {
-		let tiny: TinyString = "hello".into();
-		assert_eq!(&*tiny.read(), "hello");
-		for i in 0..300 {
-			let i: TinyString = i.to_string().into();
-			assert_ne!(i, tiny);
-		}
+    #[test]
+    fn string_pile_test() {
+        let tiny: TinyString = "hello".into();
+        assert_eq!(&*tiny.read(), "hello");
+        for i in 0..300 {
+            let i: TinyString = i.to_string().into();
+            assert_ne!(i, tiny);
+        }
 
-		assert_eq!(TinyString::new("hello"), tiny);
-	}
+        assert_eq!(TinyString::new("hello"), tiny);
+    }
 
     #[test]
     fn threading_test() {

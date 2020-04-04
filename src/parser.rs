@@ -1,9 +1,9 @@
-use crate::lexer::{ TextPos, LexerError, Lexer, Token, TokenKind };
-use crate::operator::OpKind;
-use crate::compilation_manager::{ CompilationManager };
-use crate::string_pile::{ TinyString };
+use crate::compilation_manager::CompilationManager;
 use crate::keyword::Keyword;
-use crate::types::{ FunctionHeader, Type };
+use crate::lexer::{Lexer, LexerError, TextPos, Token, TokenKind};
+use crate::operator::OpKind;
+use crate::string_pile::TinyString;
+use crate::types::{FunctionHeader, Type};
 
 pub struct Parser<'a> {
     pub manager: &'a CompilationManager,
@@ -58,37 +58,57 @@ pub fn parse_namespace(parser: &mut Parser<'_>) -> Result<(), ParseError> {
 pub fn parse_constant_definition(parser: &mut Parser<'_>) -> Result<(), ParseError> {
     // There HAS to be an identifier here
     let (name, name_token) = match parser.peek_token(0)? {
-        Some(Token { kind: TokenKind::Identifier(name), start, end }) => {
-            (name, parser.peek_token(0)?)
-        },
-        Some(Token { start, end, .. }) => return Err(ParseError {
-            loc: (start, end),
-            file: parser.file.clone(),
-            kind: ParseErrorKind::ExpectedIdentifier,
-        }),
+        Some(Token {
+            kind: TokenKind::Identifier(name),
+            start,
+            end,
+        }) => (name, parser.peek_token(0)?),
+        Some(Token { start, end, .. }) => {
+            return Err(ParseError {
+                loc: (start, end),
+                file: parser.file.clone(),
+                kind: ParseErrorKind::ExpectedIdentifier,
+            })
+        }
         // Someone(I) was dumb and called "parse_constant_definition" at the end of a file.
         // This would have given some crazy stupid error message anyways, so we might
-        // as well panic 
+        // as well panic
         None => unreachable!(),
     };
 
     // Expect a constant assignment
     match parser.peek_token(1)? {
-        Some(Token { kind: TokenKind::Operator { kind: OpKind::Constant, is_assignment: false }, .. }) => (),
+        Some(Token {
+            kind:
+                TokenKind::Operator {
+                    kind: OpKind::Constant,
+                    is_assignment: false,
+                },
+            ..
+        }) => (),
         Some(Token { start, end, .. }) => {
             return Err(ParseError {
                 loc: (start, end),
                 file: parser.file.clone(),
                 kind: ParseErrorKind::ExpectedConstantAssignment,
             })
-        },
+        }
         None => {
             return Err(ParseError {
-                loc: (TextPos { line: 9999999999, character: 9999999999 }, TextPos { line: 99999999999, character: 9999999999 }),
+                loc: (
+                    TextPos {
+                        line: 9999999999,
+                        character: 9999999999,
+                    },
+                    TextPos {
+                        line: 99999999999,
+                        character: 9999999999,
+                    },
+                ),
                 file: parser.file.clone(),
                 kind: ParseErrorKind::UnexpectedEndOfFile,
             })
-        },
+        }
     }
 
     // We are now sure that this is a namespace assignment,
@@ -98,11 +118,13 @@ pub fn parse_constant_definition(parser: &mut Parser<'_>) -> Result<(), ParseErr
 
     // Now figure out what kind of constant it is
     match parser.peek_token(0)? {
-        Some(Token { kind: TokenKind::Keyword(Keyword::Extern), start, end }) => {
+        Some(Token {
+            kind: TokenKind::Keyword(Keyword::Extern),
+            start,
+            end,
+        }) => {
             parser.tokens.eat_token();
-
-
-        },
+        }
         _ => unimplemented!(),
     }
 
@@ -111,4 +133,3 @@ pub fn parse_constant_definition(parser: &mut Parser<'_>) -> Result<(), ParseErr
     namespace_entry.push_str(&name.to_string());
     Ok(())
 }
-

@@ -1,8 +1,8 @@
-use crate::string_pile::{ TinyString };
-use std::sync::atomic::{ AtomicU32, Ordering };
-use std::sync::Mutex;
+use crate::namespace::{NamespaceID, NamespaceManager};
+use crate::string_pile::TinyString;
 use chashmap::CHashMap;
-use crate::namespace::{ NamespaceManager, NamespaceID };
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct FunctionID(u32);

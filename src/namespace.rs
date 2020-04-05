@@ -1,8 +1,8 @@
 use crate::string_pile::TinyString;
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct NamespaceID(NonZeroU32);
@@ -24,7 +24,13 @@ pub enum InsertContentError<T: Copy + std::fmt::Debug> {
         namespace: NamespaceID,
         old_content: NamespaceContent<T>,
         new_content: NamespaceContent<T>,
-    }
+    },
+    NameCannotBeExported {
+        name: TinyString,
+        from_namespace: NamespaceID,
+        to_namespace: NamespaceID,
+        content: NamespaceContent<T>,
+    },
 }
 
 #[derive(Debug)]
@@ -33,7 +39,7 @@ pub struct Namespace<T: Copy> {
     parent: Option<NamespaceID>,
     contents: HashMap<TinyString, (Publicity, NamespaceContent<T>)>,
 
-    named_exports: CHashMap<TinyString, (Publicity, ExportMode, NamespaceID)>,
+    named_exports: HashMap<TinyString, (Publicity, ExportMode, NamespaceID)>,
     wildcard_exports: Vec<(Publicity, ExportMode, NamespaceID)>,
 }
 
@@ -64,7 +70,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
             name: None,
             parent: None,
             contents: HashMap::new(),
-            named_exports: CHashMap::new(),
+            named_exports: HashMap::new(),
             wildcard_exports: Vec::new(),
         };
 
@@ -87,7 +93,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
             name: Some(name),
             parent: Some(parent_id),
             contents: HashMap::new(),
-            named_exports: CHashMap::new(),
+            named_exports: HashMap::new(),
             wildcard_exports: Vec::new(),
         };
 
@@ -115,7 +121,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
             name: None,
             parent: Some(parent_id),
             contents: HashMap::new(),
-            named_exports: CHashMap::new(),
+            named_exports: HashMap::new(),
             wildcard_exports: Vec::new(),
         };
 
@@ -193,7 +199,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
 
                         if strength.can_export(*publicity) {
                             self.search_path_recursive(*content, path, strength)
-                        }else {
+                        } else {
                             None
                         }
                     } else {
@@ -226,19 +232,65 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
         }
     }
 
-    pub fn add_wildcard_export(&self, from_id: NamespaceID, to_id: NamespaceID, export: ExportMode, export_publicity: Publicity) {
-        // Add all old members(that fit the bill) of the from to the to
-        assert_ne!(from_id, to_id, "Cannot add a wildcard export from a namespace to the same namespace");
+    pub fn add_named_export(
+        &self,
+        name: TinyString,
+        from_id: NamespaceID,
+        to_id: NamespaceID,
+        export: ExportMode,
+        export_publicity: Publicity,
+    ) -> Result<(), InsertContentError<T>> {
+        assert_ne!(
+            from_id, to_id,
+            "Cannot add a named export from a namespace to the same namespace"
+        );
         let mut from = self.get_namespace_mut(from_id);
-        let mut to   = self.get_namespace_mut(to_id);
 
-        for (id, (publicity, elem)) in from.contents.iter() {
+        // Because named exports only export one item, we don't need to keep
+        // it around after it has done its exporting.
+        if let Some((publicity, elem)) = from.contents.get(&name) {
             if export.can_export(*publicity) {
-                to.contents.insert(*id, (export_publicity, *elem));
+                self.insert_any_member(to_id, name, *elem, export_publicity)?;
+                Ok(())
+            } else {
+                Err(InsertContentError::NameCannotBeExported {
+                    name: name,
+                    from_namespace: from_id,
+                    to_namespace: to_id,
+                    content: *elem,
+                })
+            }
+        } else {
+            from.named_exports
+                .insert(name, (export_publicity, export, to_id));
+            Ok(())
+        }
+    }
+
+    pub fn add_wildcard_export(
+        &self,
+        from_id: NamespaceID,
+        to_id: NamespaceID,
+        export: ExportMode,
+        export_publicity: Publicity,
+    ) -> Result<(), InsertContentError<T>> {
+        // Add all old members(that fit the bill) of the from to the to
+        assert_ne!(
+            from_id, to_id,
+            "Cannot add a wildcard export from a namespace to the same namespace"
+        );
+        let mut from = self.get_namespace_mut(from_id);
+
+        for (name, (publicity, elem)) in from.contents.iter() {
+            if export.can_export(*publicity) {
+                self.insert_any_member(to_id, *name, *elem, export_publicity)?;
             }
         }
 
-        from.wildcard_exports.push((export_publicity, export, to_id));
+        from.wildcard_exports
+            .push((export_publicity, export, to_id));
+
+        Ok(())
     }
 
     /// Inserts a member into the namespace.
@@ -252,7 +304,12 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
         member: T,
         publicity: Publicity,
     ) -> Result<(), InsertContentError<T>> {
-        self.insert_any_member(namespace_id, member_name, NamespaceContent::Other(member), publicity)
+        self.insert_any_member(
+            namespace_id,
+            member_name,
+            NamespaceContent::Other(member),
+            publicity,
+        )
     }
 
     fn insert_any_member(
@@ -270,14 +327,35 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
                 name: member_name,
                 namespace: namespace_id,
                 old_content: old_member.1,
-                new_content: member
+                new_content: member,
             });
         }
 
-        namespace
-            .contents
-            .insert(member_name, (publicity, member));
+        namespace.contents.insert(member_name, (publicity, member));
 
+        // Named exports
+        if let Some((export_publicity, export_mode, to_id)) =
+            namespace.named_exports.get(&member_name)
+        {
+            if export_mode.can_export(publicity) {
+                self.insert_any_member(*to_id, member_name, member, *export_publicity)?;
+            } else {
+                // If the item couldn't be exported, there will be no other
+                // item with the same name that can be exported(because name exclusivity).
+                // Therefore, this case wouldn't allow this _explicit_ export to
+                // be used, hence it should create an error.
+                return Err(InsertContentError::NameCannotBeExported {
+                    name: member_name,
+                    from_namespace: namespace_id,
+                    to_namespace: *to_id,
+                    content: member,
+                });
+            }
+
+            namespace.named_exports.remove(&member_name);
+        }
+
+        // Wildcard exports
         for (export_publicity, export_mode, to_id) in namespace.wildcard_exports.iter() {
             if export_mode.can_export(publicity) {
                 self.insert_any_member(*to_id, member_name, member, *export_publicity)?;
@@ -330,7 +408,9 @@ mod tests {
         let manager = NamespaceManager::new();
 
         let root = manager.create_root();
-        assert!(manager.insert_member(root, "member".into(), 2, Publicity::Public).is_ok());
+        assert!(manager
+            .insert_member(root, "member".into(), 2, Publicity::Public)
+            .is_ok());
     }
 
     #[test]
@@ -338,25 +418,21 @@ mod tests {
         let manager = NamespaceManager::<()>::new();
 
         let root = manager.create_root();
-        let a = manager.create_named_namespace(
-            root,
-            "a".into(),
-            Publicity::Public,
-            Some(ExportMode::All),
-        ).unwrap();
-        let b = manager.create_named_namespace(
-            root,
-            "b".into(),
-            Publicity::Public,
-            Some(ExportMode::All),
-        ).unwrap();
+        let a = manager
+            .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+            .unwrap();
+        let b = manager
+            .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+            .unwrap();
         let b_child = manager.create_anonymous_namespace(b, Some(ExportMode::All));
-        let a_child = manager.create_named_namespace(
-            a,
-            "a_child".into(),
-            Publicity::Public,
-            Some(ExportMode::All),
-        ).unwrap();
+        let a_child = manager
+            .create_named_namespace(
+                a,
+                "a_child".into(),
+                Publicity::Public,
+                Some(ExportMode::All),
+            )
+            .unwrap();
         assert_eq!(manager.get_path(root), "", "root path isn't right");
         assert_eq!(manager.get_path(a), "\\a", "a's path isn't right");
         assert_eq!(manager.get_path(b), "\\b", "b's path isn't right");
@@ -377,12 +453,22 @@ mod tests {
         let manager = NamespaceManager::<u32>::new();
 
         let root = manager.create_root();
-        let a = manager.create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
-        let b = manager.create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
+        let a = manager
+            .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+            .unwrap();
+        let b = manager
+            .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+            .unwrap();
 
-        manager.insert_member(root, "hi".into(), 42, Publicity::Public).unwrap();
-        let c = manager.create_named_namespace(a, "yes".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
-        manager.insert_member(c, "perfection".into(), 69, Publicity::Public).unwrap();
+        manager
+            .insert_member(root, "hi".into(), 42, Publicity::Public)
+            .unwrap();
+        let c = manager
+            .create_named_namespace(a, "yes".into(), Publicity::Public, Some(ExportMode::All))
+            .unwrap();
+        manager
+            .insert_member(c, "perfection".into(), 69, Publicity::Public)
+            .unwrap();
 
         let found = manager.search(root, "a\\b".split('\\'), ExportMode::All);
         assert!(matches!(found, Some(NamespaceContent::Namespace(b))));
@@ -398,7 +484,124 @@ mod tests {
         let manager = NamespaceManager::<u32>::new();
 
         let root = manager.create_root();
-        let a = manager.create_named_namespace(root, "same_name".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
-        assert!(manager.create_named_namespace(root, "same_name".into(), Publicity::Public, Some(ExportMode::All)).is_err());
+        let a = manager
+            .create_named_namespace(
+                root,
+                "same_name".into(),
+                Publicity::Public,
+                Some(ExportMode::All),
+            )
+            .unwrap();
+        let found = manager.search(root, "same_name".split('\\'), ExportMode::All);
+        assert!(matches!(found, Some(_)));
+
+        assert!(manager
+            .create_named_namespace(
+                root,
+                "same_name".into(),
+                Publicity::Public,
+                Some(ExportMode::All)
+            )
+            .is_err());
+
+        // Duplicate names "nuke" both names out of the namespace.
+        // This isn't particularly important because we'll probably
+        // stop compilation at that point anyways, but it's a cool little detail
+        // I think
+        let found = manager.search(root, "same_name".split('\\'), ExportMode::All);
+        assert!(matches!(found, None));
+    }
+
+    #[test]
+    fn named_export() {
+        let manager = NamespaceManager::<u32>::new();
+
+        {
+            let root = manager.create_root();
+            let a = manager
+                .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            let b = manager
+                .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            manager
+                .add_named_export("x".into(), a, b, ExportMode::Public, Publicity::Private)
+                .unwrap();
+            manager
+                .insert_member(a, "x".into(), 42, Publicity::Public)
+                .unwrap();
+            assert!(matches!(
+                manager.search(root, "b\\x".split('\\'), ExportMode::All),
+                Some(NamespaceContent::Other(42))
+            ));
+        }
+
+        {
+            // Here we create the member first and then export
+            let root = manager.create_root();
+            let a = manager
+                .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            let b = manager
+                .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            manager
+                .insert_member(a, "x".into(), 42, Publicity::Public)
+                .unwrap();
+            manager
+                .add_named_export("x".into(), a, b, ExportMode::Public, Publicity::Private)
+                .unwrap();
+            assert!(matches!(
+                manager.search(root, "b\\x".split('\\'), ExportMode::All),
+                Some(NamespaceContent::Other(42))
+            ));
+        }
+
+        {
+            // Test for errors returning when you add a member after
+            // creating the export
+            let root = manager.create_root();
+            let a = manager
+                .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            let b = manager
+                .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            manager
+                .add_named_export("x".into(), a, b, ExportMode::Public, Publicity::Private)
+                .unwrap();
+
+            // We expect this to be an error, because the x is private, we can't export it!
+            assert!(manager
+                .insert_member(a, "x".into(), 42, Publicity::Private)
+                .is_err());
+            assert!(matches!(
+                manager.search(root, "b\\x".split('\\'), ExportMode::All),
+                None
+            ));
+        }
+
+        {
+            // Here we create the member first and then export
+            let root = manager.create_root();
+            let a = manager
+                .create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            let b = manager
+                .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
+                .unwrap();
+            manager
+                .insert_member(a, "x".into(), 42, Publicity::Private)
+                .unwrap();
+
+            // We expect this to be an error, because the x is private, we can't export it!
+            assert!(manager
+                .add_named_export("x".into(), a, b, ExportMode::Public, Publicity::Private)
+                .is_err());
+            assert!(matches!(
+                manager.search(root, "b\\x".split('\\'), ExportMode::All),
+                None
+            ));
+        }
     }
 }

@@ -2,35 +2,47 @@ use crate::string_pile::TinyString;
 use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct NamespaceID(NonZeroU32);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum NamespaceContent<T: Copy> {
     Namespace(NamespaceID),
     Other(T),
 }
 
-pub enum LocateMemberFault {
+pub enum LocateMemberError {
     NoContentWithName(TinyString),
 }
 
+#[derive(Debug)]
+pub enum InsertContentError<T: Copy + std::fmt::Debug> {
+    NameClash {
+        name: TinyString,
+        namespace: NamespaceID,
+        old_content: NamespaceContent<T>,
+        new_content: NamespaceContent<T>,
+    }
+}
+
+#[derive(Debug)]
 pub struct Namespace<T: Copy> {
     name: Option<TinyString>,
     parent: Option<NamespaceID>,
-    contents: CHashMap<TinyString, (Publicity, NamespaceContent<T>)>,
+    contents: HashMap<TinyString, (Publicity, NamespaceContent<T>)>,
 
     named_exports: CHashMap<TinyString, (Publicity, ExportMode, NamespaceID)>,
     wildcard_exports: Vec<(Publicity, ExportMode, NamespaceID)>,
 }
 
-pub struct NamespaceManager<T: Copy> {
+pub struct NamespaceManager<T: Copy + std::fmt::Debug> {
     namespace_id_ctr: AtomicU32,
     namespaces: CHashMap<NamespaceID, Namespace<T>>,
 }
 
-impl<T: Copy> NamespaceManager<T> {
+impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
     pub fn new() -> NamespaceManager<T> {
         NamespaceManager {
             namespace_id_ctr: AtomicU32::new(1),
@@ -51,7 +63,7 @@ impl<T: Copy> NamespaceManager<T> {
         let namespace = Namespace {
             name: None,
             parent: None,
-            contents: CHashMap::new(),
+            contents: HashMap::new(),
             named_exports: CHashMap::new(),
             wildcard_exports: Vec::new(),
         };
@@ -68,13 +80,13 @@ impl<T: Copy> NamespaceManager<T> {
         name: TinyString,
         publicity: Publicity,
         parent_exports: Option<ExportMode>,
-    ) -> NamespaceID {
+    ) -> Result<NamespaceID, InsertContentError<T>> {
         let id = self.allocate_id();
 
         let namespace = Namespace {
             name: Some(name),
             parent: Some(parent_id),
-            contents: CHashMap::new(),
+            contents: HashMap::new(),
             named_exports: CHashMap::new(),
             wildcard_exports: Vec::new(),
         };
@@ -83,18 +95,13 @@ impl<T: Copy> NamespaceManager<T> {
             panic!("allocate_id allocated an id twice");
         }
 
-        let mut parent = self.get_namespace_mut(parent_id);
+        self.insert_any_member(parent_id, name, NamespaceContent::Namespace(id), publicity)?;
+
         if let Some(export_mode) = parent_exports {
-            parent
-                .wildcard_exports
-                .push((Publicity::Private, export_mode, id));
+            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private);
         }
 
-        parent
-            .contents
-            .insert(name, (publicity, NamespaceContent::Namespace(id)));
-
-        id
+        Ok(id)
     }
 
     pub fn create_anonymous_namespace(
@@ -107,7 +114,7 @@ impl<T: Copy> NamespaceManager<T> {
         let namespace = Namespace {
             name: None,
             parent: Some(parent_id),
-            contents: CHashMap::new(),
+            contents: HashMap::new(),
             named_exports: CHashMap::new(),
             wildcard_exports: Vec::new(),
         };
@@ -117,10 +124,7 @@ impl<T: Copy> NamespaceManager<T> {
         }
 
         if let Some(export_mode) = parent_exports {
-            let mut parent = self.get_namespace_mut(parent_id);
-            parent
-                .wildcard_exports
-                .push((Publicity::Private, export_mode, id));
+            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private);
         }
 
         id
@@ -164,14 +168,16 @@ impl<T: Copy> NamespaceManager<T> {
         &self,
         src: NamespaceID,
         path: impl Iterator<Item = impl Into<TinyString>>,
+        strength: ExportMode,
     ) -> Option<NamespaceContent<T>> {
-        self.search_path_recursive(NamespaceContent::Namespace(src), path)
+        self.search_path_recursive(NamespaceContent::Namespace(src), path, strength)
     }
 
     fn search_path_recursive(
         &self,
         src: NamespaceContent<T>,
         mut path: impl Iterator<Item = impl Into<TinyString>>,
+        strength: ExportMode,
     ) -> Option<NamespaceContent<T>> {
         match path.next() {
             Some(value) => {
@@ -180,10 +186,16 @@ impl<T: Copy> NamespaceManager<T> {
                     let contents = &namespace.contents;
 
                     let tiny: TinyString = value.into();
-                    let guard = contents.get(&tiny);
+                    let content = contents.get(&tiny);
 
-                    if let Some(guard) = guard {
-                        self.search_path_recursive(guard.1, path)
+                    if let Some(content) = content {
+                        let (publicity, content) = content;
+
+                        if strength.can_export(*publicity) {
+                            self.search_path_recursive(*content, path, strength)
+                        }else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -214,19 +226,20 @@ impl<T: Copy> NamespaceManager<T> {
         }
     }
 
-    // pub fn locate_member(&self,
-    //                      src: NamespaceContent<T>,
-    //                      path: Iterator<Item = TinyString>)
-    //         -> Result<T, LocateMemberFault> {
-    //     match path.next() {
-    //         Some(descent) => {
-    //             if let NamespaceContent::Namespace(id) = src {
-    //                 let namespace = self.get_namespace(&id);
-    //             }else {
-    //             }
-    //         },
-    //     }
-    // }
+    pub fn add_wildcard_export(&self, from_id: NamespaceID, to_id: NamespaceID, export: ExportMode, export_publicity: Publicity) {
+        // Add all old members(that fit the bill) of the from to the to
+        assert_ne!(from_id, to_id, "Cannot add a wildcard export from a namespace to the same namespace");
+        let mut from = self.get_namespace_mut(from_id);
+        let mut to   = self.get_namespace_mut(to_id);
+
+        for (id, (publicity, elem)) in from.contents.iter() {
+            if export.can_export(*publicity) {
+                to.contents.insert(*id, (export_publicity, *elem));
+            }
+        }
+
+        from.wildcard_exports.push((export_publicity, export, to_id));
+    }
 
     /// Inserts a member into the namespace.
     /// If you need to insert a namespace, there are methods to doing that.
@@ -238,20 +251,44 @@ impl<T: Copy> NamespaceManager<T> {
         member_name: TinyString,
         member: T,
         publicity: Publicity,
-    ) -> bool {
-        let namespace = self.get_namespace(namespace_id);
+    ) -> Result<(), InsertContentError<T>> {
+        self.insert_any_member(namespace_id, member_name, NamespaceContent::Other(member), publicity)
+    }
 
-        let old_member = namespace
+    fn insert_any_member(
+        &self,
+        namespace_id: NamespaceID,
+        member_name: TinyString,
+        member: NamespaceContent<T>,
+        publicity: Publicity,
+    ) -> Result<(), InsertContentError<T>> {
+        let mut namespace = self.get_namespace_mut(namespace_id);
+
+        // Check for an old duplicate value
+        if let Some(old_member) = namespace.contents.remove(&member_name) {
+            return Err(InsertContentError::NameClash {
+                name: member_name,
+                namespace: namespace_id,
+                old_content: old_member.1,
+                new_content: member
+            });
+        }
+
+        namespace
             .contents
-            .insert(member_name, (publicity, NamespaceContent::Other(member)));
+            .insert(member_name, (publicity, member));
 
-        // If there was an old member with this name,
-        // we have a name collision!
-        old_member.is_some()
+        for (export_publicity, export_mode, to_id) in namespace.wildcard_exports.iter() {
+            if export_mode.can_export(publicity) {
+                self.insert_any_member(*to_id, member_name, member, *export_publicity)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ExportMode {
     All,
     Public,
@@ -267,7 +304,7 @@ impl ExportMode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Publicity {
     Public,
     Private,
@@ -293,7 +330,7 @@ mod tests {
         let manager = NamespaceManager::new();
 
         let root = manager.create_root();
-        assert!(!manager.insert_member(root, "member".into(), 2, Publicity::Public));
+        assert!(manager.insert_member(root, "member".into(), 2, Publicity::Public).is_ok());
     }
 
     #[test]
@@ -306,20 +343,20 @@ mod tests {
             "a".into(),
             Publicity::Public,
             Some(ExportMode::All),
-        );
+        ).unwrap();
         let b = manager.create_named_namespace(
             root,
             "b".into(),
             Publicity::Public,
             Some(ExportMode::All),
-        );
+        ).unwrap();
         let b_child = manager.create_anonymous_namespace(b, Some(ExportMode::All));
         let a_child = manager.create_named_namespace(
             a,
             "a_child".into(),
             Publicity::Public,
             Some(ExportMode::All),
-        );
+        ).unwrap();
         assert_eq!(manager.get_path(root), "", "root path isn't right");
         assert_eq!(manager.get_path(a), "\\a", "a's path isn't right");
         assert_eq!(manager.get_path(b), "\\b", "b's path isn't right");
@@ -340,12 +377,28 @@ mod tests {
         let manager = NamespaceManager::<u32>::new();
 
         let root = manager.create_root();
-        let a = manager.create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All));
-        let b = manager.create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All));
+        let a = manager.create_named_namespace(root, "a".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
+        let b = manager.create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
 
-        manager.insert_member(root, "hi".into(), 42, Publicity::Public);
+        manager.insert_member(root, "hi".into(), 42, Publicity::Public).unwrap();
+        let c = manager.create_named_namespace(a, "yes".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
+        manager.insert_member(c, "perfection".into(), 69, Publicity::Public).unwrap();
 
-        let found = manager.search(root, "hi".split('\\'));
+        let found = manager.search(root, "a\\b".split('\\'), ExportMode::All);
+        assert!(matches!(found, Some(NamespaceContent::Namespace(b))));
+
+        let found = manager.search(root, "hi".split('\\'), ExportMode::All);
         assert!(matches!(found, Some(NamespaceContent::Other(42))));
+        let found = manager.search(root, "a\\yes\\perfection".split('\\'), ExportMode::All);
+        assert!(matches!(found, Some(NamespaceContent::Other(69))));
+    }
+
+    #[test]
+    fn duplicate_members() {
+        let manager = NamespaceManager::<u32>::new();
+
+        let root = manager.create_root();
+        let a = manager.create_named_namespace(root, "same_name".into(), Publicity::Public, Some(ExportMode::All)).unwrap();
+        assert!(manager.create_named_namespace(root, "same_name".into(), Publicity::Public, Some(ExportMode::All)).is_err());
     }
 }

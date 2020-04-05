@@ -106,7 +106,7 @@ mod tests {
     fn string_pile_test() {
         let tiny: TinyString = "hello".into();
         assert_eq!(&*tiny.read(), "hello");
-        for i in 0..300 {
+        for i in 0..10 {
             let i: TinyString = i.to_string().into();
             assert_ne!(i, tiny);
         }

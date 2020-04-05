@@ -5,7 +5,7 @@
 // extern io;
 // use io::print;
 
-extern main :: () {
+main :: () {
 	x := 1;
 	x += 2;
 };

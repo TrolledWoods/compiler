@@ -52,6 +52,19 @@ pub struct TextPos {
     pub character: usize,
 }
 
+impl TextPos {
+    pub fn new(line: usize, character: usize) -> TextPos {
+        TextPos { line, character }
+    }
+
+    pub fn end_of_file() -> TextPos {
+        TextPos {
+            line: std::usize::MAX,
+            character: std::usize::MAX,
+        }
+    }
+}
+
 impl std::fmt::Display for TextPos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.line + 1, self.character + 1)
@@ -80,7 +93,7 @@ enum ReadTokenState {
 
 pub struct Lexer<'a> {
     source: Chars<'a>,
-    current_pos: TextPos,
+    pub current_pos: TextPos,
 
     peeked_tokens: VecDeque<Token>,
     poisoned: bool,
@@ -541,6 +554,7 @@ impl Lexer<'_> {
                         "extern" => TokenKind::Keyword(Keyword::Extern),
                         "use" => TokenKind::Keyword(Keyword::Use),
                         "module" => TokenKind::Keyword(Keyword::Module),
+                        "pub" => TokenKind::Keyword(Keyword::Public),
                         _ => TokenKind::Identifier(word.into()),
                     },
                     start: start,

@@ -18,4 +18,5 @@ pub enum Keyword {
     // Namespaces
     Use,
     Module,
+    Public,
 }

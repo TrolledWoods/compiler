@@ -2,15 +2,13 @@ use crate::string_pile::TinyString;
 
 pub enum Type {
     Primitive(PrimitiveKind),
-    UserDefined(TinyString),
+    Function(FunctionHeader),
 }
 
 pub struct FunctionHeader {
-    pub args: Vec<Type>,
-    pub return_type: Option<Type>,
+    pub inputs: Vec<Type>,
+    pub returns: Option<Box<Type>>,
 }
-
-pub struct Trait {}
 
 pub enum PrimitiveKind {
     U8,

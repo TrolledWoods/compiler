@@ -1,31 +1,43 @@
-// An external module is just a "library"
-// that is defined externally. It is going to have
-// some routines that are indexed, and that can be called
-// from the runtime in here!
-// extern io;
-// use io::print;
+// Generic function header? i.e.
+// any function named add has to be called
+// with this pattern.
+// pub Add[A, B, R] : (A, B) -> (R);
 
-main :: () {
-	x := 1;
-	x += 2;
+// Generic type aliases, i.e,
+// a generic type which is just shorthand
+// for a longer generic type
+// pub FullAdd[T] :: Add[T, T, T];
+
+// pub AddNumbers[T, D] :: (a: T, b: T) -> (D) {
+// 	// If there is no implementation for T or D in add,
+// 	// it shouldn't be hard to create an error, like
+// 	// "Add[i32, i32, f32] is not a variant of the Add generic function"
+// 	// or smth.
+// 	Add[T, T, D](a, b)
+// };
+
+Test :: struct {
+	x: f32,
+	y: f32,
 };
 
-// //mult_with_add :: (a: u32, b: u32) -> u32 {
-// 	if b == 0 {
-// 		0
-// 	}else{
-// 		mult_with_add(a, b - 1) + a
-// 	}
-// };
+sub_module :: {
+	SubTest :: struct {
+		wow: Hi,
+		this_works: XD,
+	};
+};
+
+// pub math :: {
+// 	pub Vec :: struct {
+// 		x: f32,
+// 		y: f32,
+// 	};
 // 
-// // export functions cannot have generics.
-// // That is because normal functions are compiled
-// // for every unique combination of generics supplied
-// // when calling them
-// // (if no generics, then they are generated when called)
-// // These are basically "entry points" for the compilation
-// // of functions and also define the rest of the program
-// // that has to be included in the binary
-// main :: export () {
-// 	println("hello world!");
+// 	FullAdd[Vec] :: (a: Vec, b: Vec) -> (Vec) {
+// 		Vec {
+// 			x: a.x + b.x,
+// 			y: a.y + b.y,
+// 		}
+// 	};
 // };

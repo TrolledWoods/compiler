@@ -104,7 +104,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
         self.insert_any_member(parent_id, name, NamespaceContent::Namespace(id), publicity)?;
 
         if let Some(export_mode) = parent_exports {
-            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private);
+            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private)?;
         }
 
         Ok(id)
@@ -114,7 +114,7 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
         &self,
         parent_id: NamespaceID,
         parent_exports: Option<ExportMode>,
-    ) -> NamespaceID {
+    ) -> Result<NamespaceID, InsertContentError<T>> {
         let id = self.allocate_id();
 
         let namespace = Namespace {
@@ -130,10 +130,10 @@ impl<T: Copy + std::fmt::Debug> NamespaceManager<T> {
         }
 
         if let Some(export_mode) = parent_exports {
-            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private);
+            self.add_wildcard_export(parent_id, id, ExportMode::All, Publicity::Private)?;
         }
 
-        id
+        Ok(id)
     }
 
     /// Returns the namespace based on the namespace id.
@@ -424,7 +424,9 @@ mod tests {
         let b = manager
             .create_named_namespace(root, "b".into(), Publicity::Public, Some(ExportMode::All))
             .unwrap();
-        let b_child = manager.create_anonymous_namespace(b, Some(ExportMode::All));
+        let b_child = manager
+            .create_anonymous_namespace(b, Some(ExportMode::All))
+            .unwrap();
         let a_child = manager
             .create_named_namespace(
                 a,

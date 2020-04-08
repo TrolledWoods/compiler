@@ -1,43 +1,8 @@
-// Generic function header? i.e.
-// any function named add has to be called
-// with this pattern.
-// pub Add[A, B, R] : (A, B) -> (R);
+sub_space :: {
+	StructInSubspace  :: struct {};
+};
 
-// Generic type aliases, i.e,
-// a generic type which is just shorthand
-// for a longer generic type
-// pub FullAdd[T] :: Add[T, T, T];
-
-// pub AddNumbers[T, D] :: (a: T, b: T) -> (D) {
-// 	// If there is no implementation for T or D in add,
-// 	// it shouldn't be hard to create an error, like
-// 	// "Add[i32, i32, f32] is not a variant of the Add generic function"
-// 	// or smth.
-// 	Add[T, T, D](a, b)
-// };
-
-Test :: struct {
+pub Hi:: struct {
 	x: f32,
 	y: f32,
 };
-
-sub_module :: {
-	SubTest :: struct {
-		wow: Hi,
-		this_works: XD,
-	};
-};
-
-// pub math :: {
-// 	pub Vec :: struct {
-// 		x: f32,
-// 		y: f32,
-// 	};
-// 
-// 	FullAdd[Vec] :: (a: Vec, b: Vec) -> (Vec) {
-// 		Vec {
-// 			x: a.x + b.x,
-// 			y: a.y + b.y,
-// 		}
-// 	};
-// };

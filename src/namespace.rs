@@ -388,17 +388,6 @@ pub enum Publicity {
     Private,
 }
 
-impl Publicity {
-    // If we have a chained import, what
-    pub fn pipe(self, other: Publicity) -> Publicity {
-        if self == Publicity::Public && other == Publicity::Public {
-            Publicity::Public
-        } else {
-            Publicity::Private
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

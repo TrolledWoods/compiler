@@ -1,9 +1,10 @@
-use crate::namespace::{ NamespaceID, NamespaceManager, Publicity, InsertContentError };
+use crate::lexer::Token;
+use crate::namespace::{InsertContentError, NamespaceID, NamespaceManager, Publicity};
 use crate::string_pile::TinyString;
 use chashmap::CHashMap;
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum ID {
@@ -39,8 +40,7 @@ impl<U, F> CompileStageType<U, F> {
         let id = self.id_ctr.fetch_add(1, Ordering::SeqCst);
         let id = NonZeroU32::new(id).unwrap();
 
-        let val = self.values.insert(id, 
-                 CompileStages::Untouched(value));
+        let val = self.values.insert(id, CompileStages::Untouched(value));
         // If the id_ctr works, there should always
         // be a unique id for every value, so no old
         // value should exist here!
@@ -64,40 +64,32 @@ impl CompileManager {
         }
     }
 
-    pub fn insert_struct(&self, 
-                         loc: NamespaceID, 
-                         publicity: Publicity, 
-                         name: TinyString, 
-                         def: StructDef,
-                         ) -> Result<ID, InsertContentError<ID>> {
+    pub fn insert_struct(
+        &self,
+        loc: NamespaceID,
+        publicity: Publicity,
+        name: TinyString,
+        def: StructDef,
+    ) -> Result<ID, InsertContentError<ID>> {
         let id = self.structs.insert(def);
 
-        self.namespace.insert_member(
-            loc, 
-            name, 
-            ID::Struct(id), 
-            publicity,
-        )?;
+        self.namespace
+            .insert_member(loc, name, ID::Struct(id), publicity)?;
 
         Ok(ID::Struct(id))
     }
 }
 
-/// A trait for things that can return all the
-/// things they depend on in a namespace
-trait Dependant {
-    fn get_dependencies<'a>(&'a self) -> Box<dyn Iterator<Item = TinyString> + 'a>;
+#[derive(Debug)]
+pub struct Identifier {
+    pub definition: Token,
+    pub data: TinyString,
 }
 
 #[derive(Debug)]
 pub struct StructDef {
-    pub members: Vec<(TinyString, TinyString)>,
-}
-
-impl Dependant for StructDef {
-    fn get_dependencies<'a>(&'a self) -> Box<dyn Iterator<Item = TinyString> + 'a> {
-        Box::new(self.members.iter().map(move |(a, b)| *b))
-    }
+    pub head: Token,
+    pub members: Vec<(Identifier, Identifier)>,
 }
 
 pub struct Struct {

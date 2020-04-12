@@ -1,0 +1,12 @@
+and :: load
+
+MoreStructs :: struct {
+	help: f32,
+	me: String,
+	I: Hi,
+	yo: yo,
+};
+
+is_fat :: {
+	and :: load;
+};

@@ -1,8 +1,12 @@
+test :: load;
+your_mom :: load;
+
 sub_space :: {
 	StructInSubspace  :: struct {};
 };
 
-pub Hi:: struct {
+pub Hi :: struct {
 	x: f32,
 	y: f32,
+	z: f32,
 };

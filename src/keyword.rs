@@ -19,4 +19,5 @@ pub enum Keyword {
     Use,
     Module,
     Public,
+    Load,
 }

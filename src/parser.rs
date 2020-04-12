@@ -4,6 +4,8 @@ use crate::lexer::{BracketKind, Lexer, LexerError, TextPos, Token, TokenKind};
 use crate::namespace::{ExportMode, InsertContentError, NamespaceID, NamespaceManager, Publicity};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
+use crate::SRC_EXTENSION;
+use std::thread::{self, JoinHandle};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -54,11 +56,13 @@ pub enum ParsingActivity {
     Constant,
     ConstantValue,
     Namespace,
+    LoadNamespace,
 }
 
 #[derive(Debug, Clone)]
 pub enum GotAsToken {
     Some(Token),
+    InvalidState,
     Error(LexerError),
 
     /// This means we were at the end of the
@@ -87,6 +91,7 @@ pub struct ParseError {
 #[derive(Debug)]
 pub enum ExpectedValue {
     Identifier,
+    FileNamespace,
 
     Kind(TokenKind),
 
@@ -109,12 +114,8 @@ pub fn parse_namespace(
     parser: &mut Parser<'_>,
     in_block: bool,
     id: NamespaceID,
-    allow_loads: Option<PathBuf>,
+    mut allow_loads: Option<(PathBuf, &mut Vec<JoinHandle<Vec<ParseError>>>)>,
 ) -> Result<(), ParseError> {
-    if let Some(allow_loads) = allow_loads {
-        // assert!(allow_loads.is_dir());
-    }
-
     while let Some(token) = parser.peek_token(ParsingActivity::Namespace, 0)? {
         if let Token {
             kind: TokenKind::ClosingBracket(BracketKind::Curly),
@@ -127,7 +128,14 @@ pub fn parse_namespace(
             }
         }
 
-        parse_constant_definition(parser, id)?;
+        match &mut allow_loads {
+            Some((allow_loads, active_threads)) => {
+                parse_constant_definition(parser, id, Some((allow_loads, *active_threads)))?;
+            },
+            None => {
+                parse_constant_definition(parser, id, None);
+            }
+        }
     }
 
     if !in_block {
@@ -241,6 +249,7 @@ pub fn parse_identifier(
 pub fn parse_constant_definition(
     parser: &mut Parser<'_>,
     namespace_id: NamespaceID,
+    can_load_file: Option<(&Path, &mut Vec<JoinHandle<Vec<ParseError>>>)>,
 ) -> Result<(), ParseError> {
     // Is this public?
     let publicity_token = try_parse_keyword(parser, Keyword::Public, ParsingActivity::Constant)?;
@@ -270,17 +279,10 @@ pub fn parse_constant_definition(
             end,
         }) => {
             let s = parse_struct(parser)?;
-            // parser.manager.insert(parser.namespace,
-            //                       if is_public {
-            //                           Publicity::Public
-            //                       }else {
-            //                           Publicity::Private
-            //                       },
-            //                       name,
-            //                       s
-            //                       )?;
+
             println!(
-                "Parsed a struct in {}! {:?}",
+                "{}: {}, {:?}",
+                parser.file,
                 parser.manager.namespace.get_path(namespace_id),
                 s
             );
@@ -302,11 +304,80 @@ pub fn parse_constant_definition(
             let sub_namespace = match sub_namespace {
                 Ok(value) => value,
                 Err(err) => {
+                    println!("{}", identifier.data);
                     unimplemented!();
+                    // return Err(
+                    // );
                 }
             };
             parse_namespace(parser, true, sub_namespace, None)?;
-        }
+        },
+        Some(Token {
+            kind: TokenKind::Keyword(Keyword::Load),
+            ..
+        }) => {
+            println!("Found load! {}", identifier.data);
+            parser.eat_token(ParsingActivity::LoadNamespace)?;
+
+            if let Some((folder_name, threads)) = can_load_file {
+                let manager = parser.manager.clone();
+                let mut folder = PathBuf::from(folder_name);
+                println!("In folder: {:?}, file: {}", folder, identifier.data);
+                
+                threads.push(thread::spawn(move || {
+                    let name = identifier.data.to_string();
+                    folder.push(&name);
+
+                    let mut file = folder.clone();
+                    file.set_extension(SRC_EXTENSION);
+
+                    let input = std::fs::read_to_string(&file).unwrap();
+
+                    let mut lexer = Lexer::new(&input);
+
+                    let sub_namespace = manager.namespace.create_named_namespace(
+                        namespace_id,
+                        identifier.data,
+                        publicity,
+                        Some(ExportMode::All),
+                    );
+
+                    let sub_namespace = match sub_namespace {
+                        Ok(value) => value,
+                        Err(err) => {
+                            unimplemented!();
+                        }
+                    };
+
+                    let mut parser = Parser {
+                        manager: manager.clone(),
+                        file: file.to_str().expect("String conversion not possible :<").into(),
+                        tokens: lexer,
+                    };
+
+                    let mut threads = Vec::new();
+                    let mut errors = Vec::new();
+
+                    match parse_namespace(&mut parser, false, sub_namespace, Some((folder, &mut threads))) {
+                        Ok(_) => (),
+                        Err(err) => errors.push(err),
+                    }
+
+                    for thread in threads {
+                        errors.append(&mut thread.join().unwrap());
+                    }
+
+                    errors
+                }));
+            } else {
+                return Err(ParseError {
+                    file: parser.file,
+                    activity: ParsingActivity::LoadNamespace,
+                    expected: vec![ExpectedValue::FileNamespace],
+                    got: GotAsToken::InvalidState,
+                });
+            }
+        },
         _ => {
             return Err(ParseError {
                 file: parser.file,

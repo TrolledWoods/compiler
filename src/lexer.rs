@@ -555,6 +555,7 @@ impl Lexer<'_> {
                         "use" => TokenKind::Keyword(Keyword::Use),
                         "module" => TokenKind::Keyword(Keyword::Module),
                         "pub" => TokenKind::Keyword(Keyword::Public),
+                        "load" => TokenKind::Keyword(Keyword::Load),
                         _ => TokenKind::Identifier(word.into()),
                     },
                     start: start,

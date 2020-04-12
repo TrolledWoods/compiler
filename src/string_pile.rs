@@ -18,6 +18,14 @@ fn read_pile<'a>() -> RwLockReadGuard<'a, Vec<String>> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TinyString(usize);
 
+impl TinyString {
+    // pub fn read<'a>(&'a self) -> (&'a str, RwLockReadGuard<'a, Vec<String>>) {
+    //     let guard = PILE.read().unwrap();
+
+    //     (&guard[self.0], guard)
+    // }
+}
+
 impl std::cmp::PartialEq<&str> for TinyString {
     fn eq(&self, other: &&str) -> bool {
         let other: TinyString = (*other).into();

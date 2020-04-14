@@ -1,7 +1,8 @@
-#![allow(warnings)]
+// #![allow(warnings)]
 use std::sync::Arc;
 use std::path::{ PathBuf };
 
+extern crate ansi_term;
 extern crate chashmap;
 #[macro_use]
 extern crate lazy_static;
@@ -16,6 +17,7 @@ mod namespace;
 mod operator;
 mod parser;
 mod string_pile;
+mod error;
 
 // mod types;
 
@@ -41,7 +43,7 @@ fn main() {
 
     let input = std::fs::read_to_string(&src_file_path).unwrap();
 
-    let mut lexer = lexer::Lexer::new(&input);
+    let mut lexer = lexer::Lexer::new(src_file_path.to_str().unwrap().into(), &input);
     let manager = Arc::new(compilation_manager::CompileManager::new());
 
     let mut parser = parser::Parser {
@@ -62,10 +64,12 @@ fn main() {
     }
 
     if errors.len() > 0 {
+        use crate::error::CompileError;
+
         println!("There were errors!");
 
         for error in errors {
-            println!("{:?}", error);
+            error.get_printing_data().print();
         }
 
         return;

@@ -5,6 +5,8 @@ use crate::namespace::{NamespaceError, NamespaceId, NamespaceManager};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
 use crate::SRC_EXTENSION;
+use crate::error::{CompileError, ErrorPrintingData};
+use std::fmt::{self, Formatter, Display};
 use std::thread::{self, JoinHandle};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,10 +43,24 @@ pub enum ParsingActivity {
     LoadNamespace,
 }
 
+impl Display for ParsingActivity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use ParsingActivity::*;
+        match self {
+            Debug => write!(f, "COMPILER DEBBUGING THING"),
+            Struct => write!(f, "struct"),
+            StructMember => write!(f, "struct member"),
+            Constant => write!(f, "constant"),
+            ConstantValue => write!(f, "constant value"),
+            Namespace => write!(f, "namespace"),
+            LoadNamespace => write!(f, "external namespace load"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum GotAsToken {
     Some(Token),
-    InvalidState,
 
     /// This means we were at the end of the
     /// file but didn't get a token we had
@@ -66,6 +82,49 @@ pub enum ParseError {
     UnexpectedToken(UnexpectedTokenError),
     Lexer(LexerError),
     Namespace(NamespaceError),
+}
+
+impl CompileError for ParseError {
+    fn get_printing_data(self) -> ErrorPrintingData {
+        match self {
+            ParseError::UnexpectedToken(error) => {
+                let message = format!("Unexpected token while parsing {}", error.activity);
+
+                let pos = match error.got {
+                    GotAsToken::Some(token) => SourcePos {
+                        file: error.file,
+                        start: token.start,
+                        end: token.end
+                    },
+                    GotAsToken::None => SourcePos {
+                        file: error.file,
+                        start: TextPos::end_of_file(), 
+                        end: TextPos::end_of_file(),
+                    },
+                };
+
+                let mut expected = format!("Expected ");
+                for (i, value) in error.expected.iter().enumerate() {
+                    let addition = if i > 0 {
+                        format!(", {}", value)
+                    }else {
+                        format!("{}", value)
+                    };
+
+                    expected.push_str(&addition);
+                }
+
+                ErrorPrintingData::new(message)
+                    .problem(pos, expected)
+            },
+            ParseError::Lexer(error) => {
+                error.get_printing_data()
+            },
+            ParseError::Namespace(error) => {
+                unimplemented!()
+            },
+        }
+    }
 }
 
 impl From<UnexpectedTokenError> for ParseError {
@@ -104,6 +163,20 @@ pub enum ExpectedValue {
     Keyword(Keyword),
     ClosingBracket(BracketKind),
     OpeningBracket(BracketKind),
+}
+
+impl Display for ExpectedValue {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use ExpectedValue::*;
+        match self {
+            Identifier => write!(f, "identifier"),
+            FileNamespace => write!(f, "namespaced file"),
+            Kind(kind) => write!(f, "kind '{:?}'", kind),
+            Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
+            ClosingBracket(kind) => write!(f, "closing {:?}", kind),
+            OpeningBracket(kind) => write!(f, "opening {:?}", kind),
+        }
+    }
 }
 
 /// Just parses a namespace.

@@ -1,6 +1,7 @@
 use crate::keyword::Keyword;
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
+use crate::error::{CompileError, ErrorPrintingData};
 use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -28,8 +29,51 @@ pub enum TokenKind {
 
 #[derive(Clone, Debug)]
 pub struct LexerError {
+    pub file: TinyString,
     pub kind: LexerErrorKind,
     pub pos: TextPos,
+}
+
+impl CompileError for LexerError {
+    fn get_printing_data(self) -> ErrorPrintingData {
+        use LexerErrorKind::*;
+        match self.kind {
+            UnexpectedEndOfFile => 
+                ErrorPrintingData::new(
+                    format!("Unexpected end of file")
+                ).problem(SourcePos {
+                    file: self.file,
+                    start: self.pos,
+                    end: self.pos,
+                }, 
+                format!("Ended here")
+                ),
+            InvalidToken =>
+                ErrorPrintingData::new(
+                    format!("Invalid token"),
+                ).problem(SourcePos {
+                    file: self.file,
+                    start: self.pos,
+                    end: self.pos,
+                },
+                format!("Here"),
+                ),
+            UnclosedStringLiteral { pos } =>
+                ErrorPrintingData::new(
+                    format!("String literal isn't closed")
+                ).problem(SourcePos {
+                    file: self.file,
+                    start: self.pos,
+                    end: pos,
+                },
+                format!("String that isn't closed")
+                ),
+            _ => {
+                println!("{:?}", self);
+                unimplemented!()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -45,6 +89,7 @@ pub enum LexerErrorKind {
     InvalidUnicode(u32),
     InvalidHexDigit(char),
 }
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourcePos {
@@ -90,6 +135,10 @@ impl std::fmt::Display for TextPos {
 
 impl std::fmt::Debug for TextPos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.line == std::usize::MAX {
+            return write!(f, "end of file");
+        }
+
         write!(f, "{}:{}", self.line + 1, self.character + 1)
     }
 }
@@ -110,6 +159,7 @@ enum ReadTokenState {
 
 pub struct Lexer<'a> {
     source: Chars<'a>,
+    file: TinyString,
     pub current_pos: TextPos,
 
     peeked_tokens: VecDeque<Token>,
@@ -117,9 +167,10 @@ pub struct Lexer<'a> {
 }
 
 impl Lexer<'_> {
-    pub fn new<'a>(source: &'a str) -> Lexer<'a> {
+    pub fn new<'a>(file: TinyString, source: &'a str) -> Lexer<'a> {
         Lexer {
             source: source.chars(),
+            file,
             current_pos: TextPos {
                 line: 0,
                 character: 0,
@@ -167,7 +218,6 @@ impl Lexer<'_> {
 
     /// Tries to eat a token.
     pub fn eat_token(&mut self) -> Result<Option<Token>, LexerError> {
-        // Try to make this more efficient maybe? :^)
         self.peek_token(0)?;
         Ok(self.peeked_tokens.pop_front())
     }
@@ -216,6 +266,7 @@ impl Lexer<'_> {
                                         // Do a check so that the number cannot be too big
                                         if i >= 9 {
                                             return Err(LexerError {
+                                                file: self.file,
                                                 kind: LexerErrorKind::InvalidHexU32 {
                                                     end: self.current_pos,
                                                 },
@@ -227,6 +278,7 @@ impl Lexer<'_> {
                                     }
                                     None => {
                                         return Err(LexerError {
+                                            file: self.file,
                                             kind: LexerErrorKind::InvalidHexDigit(c),
                                             pos: self.current_pos,
                                         })
@@ -234,6 +286,7 @@ impl Lexer<'_> {
                                 },
                                 None => {
                                     return Err(LexerError {
+                                        file: self.file,
                                         kind: LexerErrorKind::UnfinishedEscapeCode,
                                         pos: self.current_pos,
                                     })
@@ -245,6 +298,7 @@ impl Lexer<'_> {
                             Some(c) => Ok(c),
                             None => {
                                 return Err(LexerError {
+                                    file: self.file,
                                     kind: LexerErrorKind::InvalidUnicode(unicode_number),
                                     pos: number_start,
                                 })
@@ -253,12 +307,14 @@ impl Lexer<'_> {
                     }
                     Some(_) => {
                         return Err(LexerError {
+                            file: self.file,
                             kind: LexerErrorKind::BadEscapeCode,
                             pos: start,
                         })
                     }
                     None => {
                         return Err(LexerError {
+                            file: self.file,
                             kind: LexerErrorKind::UnfinishedEscapeCode,
                             pos: self.current_pos,
                         })
@@ -268,6 +324,7 @@ impl Lexer<'_> {
             Some(c) => Ok(c),
             None => {
                 return Err(LexerError {
+                    file: self.file,
                     kind: LexerErrorKind::ExpectedChar,
                     pos: start,
                 })
@@ -418,6 +475,7 @@ impl Lexer<'_> {
                             decimal_point = Some(0);
                         } else {
                             return Err(LexerError {
+                                file: self.file,
                                 kind: LexerErrorKind::ManyDecimalPoints,
                                 pos: start,
                             });
@@ -521,6 +579,15 @@ impl Lexer<'_> {
                 while self.peek_char() != Some('"') {
                     // "read_possible_escaped_char" will error if the file
                     // ends
+                    if self.peek_char() == None {
+                        return Err(LexerError {
+                            file: self.file,
+                            kind: LexerErrorKind::UnclosedStringLiteral { 
+                                pos: self.current_pos
+                            },
+                            pos: start
+                        });
+                    }
                     string.push(self.read_possibly_escaped_char()?);
                 }
 
@@ -576,6 +643,7 @@ impl Lexer<'_> {
             }
             None => Ok(ReadTokenState::EndOfFile),
             _ => Err(LexerError {
+                file: self.file,
                 kind: LexerErrorKind::InvalidToken,
                 pos: self.current_pos,
             }),

@@ -1,12 +1,24 @@
-test :: load;
-your_mom :: load;
-
-sub_space :: {
-	StructInSubspace  :: struct {};
-};
-
-pub Hi :: struct {
+Vec2f :: struct {
 	x: f32,
 	y: f32,
-	z: f32,
+};
+
+Vec2f :: struct {
+	x: f32,
+	y: f32,
+};
+
+Vec2f :: struct {
+	x: f32,
+	y: f32,
+};
+
+Vec2f :: struct {
+	x: f32,
+	y: f32,
+};
+
+Vec2f :: struct {
+	x: f32,
+	y: f32,
 };

@@ -1,7 +1,7 @@
-use crate::compilation_manager::{CompileManager, Identifier, StructDef, ID};
+use crate::compilation_manager::{CompileManager, Identifier, DefinedStruct, Id};
 use crate::keyword::Keyword;
-use crate::lexer::{BracketKind, Lexer, LexerError, TextPos, Token, TokenKind};
-use crate::namespace::{ExportMode, InsertContentError, NamespaceID, NamespaceManager, Publicity};
+use crate::lexer::{SourcePos, BracketKind, Lexer, LexerError, TextPos, Token, TokenKind};
+use crate::namespace::{NamespaceError, NamespaceId, NamespaceManager};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
 use crate::SRC_EXTENSION;
@@ -17,16 +17,7 @@ pub struct Parser<'a> {
 
 impl Parser<'_> {
     fn eat_token(&mut self, doing: ParsingActivity) -> Result<Option<Token>, ParseError> {
-        let token = self.tokens.eat_token();
-        match token {
-            Ok(t) => Ok(t),
-            Err(error) => Err(ParseError {
-                activity: doing,
-                file: self.file.clone(),
-                expected: vec![],
-                got: GotAsToken::Error(error),
-            }),
-        }
+        Ok(self.tokens.eat_token()?)
     }
 
     fn peek_token(
@@ -34,16 +25,7 @@ impl Parser<'_> {
         doing: ParsingActivity,
         n: usize,
     ) -> Result<Option<Token>, ParseError> {
-        let token = self.tokens.peek_token(n);
-        match token {
-            Ok(t) => Ok(t),
-            Err(error) => Err(ParseError {
-                activity: doing,
-                file: self.file.clone(),
-                expected: vec![],
-                got: GotAsToken::Error(error),
-            }),
-        }
+        Ok(self.tokens.peek_token(n)?)
     }
 }
 
@@ -63,7 +45,6 @@ pub enum ParsingActivity {
 pub enum GotAsToken {
     Some(Token),
     InvalidState,
-    Error(LexerError),
 
     /// This means we were at the end of the
     /// file but didn't get a token we had
@@ -81,7 +62,32 @@ impl From<Option<Token>> for GotAsToken {
 }
 
 #[derive(Debug)]
-pub struct ParseError {
+pub enum ParseError {
+    UnexpectedToken(UnexpectedTokenError),
+    Lexer(LexerError),
+    Namespace(NamespaceError),
+}
+
+impl From<UnexpectedTokenError> for ParseError {
+    fn from(err: UnexpectedTokenError) -> ParseError {
+        ParseError::UnexpectedToken(err)
+    }
+}
+
+impl From<LexerError> for ParseError {
+    fn from(err: LexerError) -> ParseError {
+        ParseError::Lexer(err)
+    }
+}
+
+impl From<NamespaceError> for ParseError {
+    fn from(err: NamespaceError) -> ParseError {
+        ParseError::Namespace(err)
+    }
+}
+
+#[derive(Debug)]
+pub struct UnexpectedTokenError {
     pub file: TinyString,
     pub activity: ParsingActivity,
     pub expected: Vec<ExpectedValue>,
@@ -113,8 +119,7 @@ pub enum ExpectedValue {
 pub fn parse_namespace(
     parser: &mut Parser<'_>,
     in_block: bool,
-    id: NamespaceID,
-    mut allow_loads: Option<(PathBuf, &mut Vec<JoinHandle<Vec<ParseError>>>)>,
+    id: NamespaceId,
 ) -> Result<(), ParseError> {
     while let Some(token) = parser.peek_token(ParsingActivity::Namespace, 0)? {
         if let Token {
@@ -128,25 +133,18 @@ pub fn parse_namespace(
             }
         }
 
-        match &mut allow_loads {
-            Some((allow_loads, active_threads)) => {
-                parse_constant_definition(parser, id, Some((allow_loads, *active_threads)))?;
-            },
-            None => {
-                parse_constant_definition(parser, id, None);
-            }
-        }
+        parse_constant_definition(parser, id)?;
     }
 
     if !in_block {
         Ok(())
     } else {
-        Err(ParseError {
+        Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Namespace,
             expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
             got: GotAsToken::None,
-        })
+        }.into())
     }
 }
 
@@ -158,12 +156,12 @@ fn parse_kind(
     let token = parser.eat_token(doing)?;
     match &token {
         Some(Token { kind: kind_, .. }) if *kind_ == kind => Ok(token.unwrap()),
-        _ => Err(ParseError {
+        _ => Err(UnexpectedTokenError {
             file: parser.file,
             activity: doing,
             expected: vec![ExpectedValue::Kind(kind)],
             got: token.into(),
-        }),
+        }.into()),
     }
 }
 
@@ -178,12 +176,12 @@ fn parse_keyword(
             kind: TokenKind::Keyword(k),
             ..
         }) if *k == keyword => Ok(token.unwrap()),
-        _ => Err(ParseError {
+        _ => Err(UnexpectedTokenError {
             file: parser.file,
             activity: doing,
             expected: vec![ExpectedValue::Keyword(keyword)],
             got: token.into(),
-        }),
+        }.into()),
     }
 }
 
@@ -233,14 +231,14 @@ pub fn parse_identifier(
             ..
         }) => Ok(Identifier {
             data: *name,
-            definition: token.unwrap(),
+            pos: SourcePos::from_token(&token.unwrap(), parser.file),
         }),
-        _ => Err(ParseError {
+        _ => Err(UnexpectedTokenError {
             file: parser.file,
             activity: doing,
             expected: vec![ExpectedValue::Identifier],
             got: token.into(),
-        }),
+        }.into()),
     }
 }
 
@@ -248,16 +246,8 @@ pub fn parse_identifier(
 // to the CompilationManager anyway
 pub fn parse_constant_definition(
     parser: &mut Parser<'_>,
-    namespace_id: NamespaceID,
-    can_load_file: Option<(&Path, &mut Vec<JoinHandle<Vec<ParseError>>>)>,
+    namespace_id: NamespaceId,
 ) -> Result<(), ParseError> {
-    // Is this public?
-    let publicity_token = try_parse_keyword(parser, Keyword::Public, ParsingActivity::Constant)?;
-    let publicity = match &publicity_token {
-        Some(_) => Publicity::Public,
-        None => Publicity::Private,
-    };
-
     let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
 
     // Expect a constant assignment
@@ -280,106 +270,11 @@ pub fn parse_constant_definition(
         }) => {
             let s = parse_struct(parser)?;
 
-            println!(
-                "{}: {}, {:?}",
-                parser.file,
-                parser.manager.namespace.get_path(namespace_id),
-                s
-            );
+            println!("{:?}", &s);
+            parser.manager.insert_struct(namespace_id, identifier, s)?;
         }
-        Some(Token {
-            kind: TokenKind::OpeningBracket(BracketKind::Curly),
-            start,
-            end,
-        }) => {
-            parser.eat_token(ParsingActivity::Namespace)?;
-
-            let sub_namespace = parser.manager.namespace.create_named_namespace(
-                namespace_id,
-                identifier.data,
-                publicity,
-                Some(ExportMode::All),
-            );
-
-            let sub_namespace = match sub_namespace {
-                Ok(value) => value,
-                Err(err) => {
-                    println!("{}", identifier.data);
-                    unimplemented!();
-                    // return Err(
-                    // );
-                }
-            };
-            parse_namespace(parser, true, sub_namespace, None)?;
-        },
-        Some(Token {
-            kind: TokenKind::Keyword(Keyword::Load),
-            ..
-        }) => {
-            println!("Found load! {}", identifier.data);
-            parser.eat_token(ParsingActivity::LoadNamespace)?;
-
-            if let Some((folder_name, threads)) = can_load_file {
-                let manager = parser.manager.clone();
-                let mut folder = PathBuf::from(folder_name);
-                println!("In folder: {:?}, file: {}", folder, identifier.data);
-                
-                threads.push(thread::spawn(move || {
-                    let name = identifier.data.to_string();
-                    folder.push(&name);
-
-                    let mut file = folder.clone();
-                    file.set_extension(SRC_EXTENSION);
-
-                    let input = std::fs::read_to_string(&file).unwrap();
-
-                    let mut lexer = Lexer::new(&input);
-
-                    let sub_namespace = manager.namespace.create_named_namespace(
-                        namespace_id,
-                        identifier.data,
-                        publicity,
-                        Some(ExportMode::All),
-                    );
-
-                    let sub_namespace = match sub_namespace {
-                        Ok(value) => value,
-                        Err(err) => {
-                            unimplemented!();
-                        }
-                    };
-
-                    let mut parser = Parser {
-                        manager: manager.clone(),
-                        file: file.to_str().expect("String conversion not possible :<").into(),
-                        tokens: lexer,
-                    };
-
-                    let mut threads = Vec::new();
-                    let mut errors = Vec::new();
-
-                    match parse_namespace(&mut parser, false, sub_namespace, Some((folder, &mut threads))) {
-                        Ok(_) => (),
-                        Err(err) => errors.push(err),
-                    }
-
-                    for thread in threads {
-                        errors.append(&mut thread.join().unwrap());
-                    }
-
-                    errors
-                }));
-            } else {
-                return Err(ParseError {
-                    file: parser.file,
-                    activity: ParsingActivity::LoadNamespace,
-                    expected: vec![ExpectedValue::FileNamespace],
-                    got: GotAsToken::InvalidState,
-                });
-            }
-        },
         _ => {
-            return Err(ParseError {
+            Err(UnexpectedTokenError {
                 file: parser.file,
                 activity: ParsingActivity::ConstantValue,
                 expected: vec![
@@ -389,7 +284,7 @@ pub fn parse_constant_definition(
                     ExpectedValue::Identifier,
                 ],
                 got: token.into(),
-            });
+            })?;
         }
     }
 
@@ -451,7 +346,7 @@ fn parse_named_list<V>(
     Ok(members)
 }
 
-fn parse_struct(parser: &mut Parser) -> Result<StructDef, ParseError> {
+fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
     // Used for error messages
     let head = parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
 
@@ -469,5 +364,5 @@ fn parse_struct(parser: &mut Parser) -> Result<StructDef, ParseError> {
         ParsingActivity::StructMember,
     )?;
 
-    Ok(StructDef { head, members })
+    Ok(DefinedStruct { head, members })
 }

@@ -1,5 +1,0 @@
-Frick :: struct{x:f32,};
-
-sub_mod2 :: {
-	Hi2 :: struct {};
-};

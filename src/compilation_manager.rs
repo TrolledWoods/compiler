@@ -1,97 +1,74 @@
-use crate::lexer::Token;
-use crate::namespace::{InsertContentError, NamespaceID, NamespaceManager, Publicity};
+use crate::lexer::{ Token, SourcePos };
+use crate::namespace::{NamespaceId, AllowAmbiguity, NamespaceError, NamespaceManager};
 use crate::string_pile::TinyString;
+use crate::id::CIdMap;
 use chashmap::CHashMap;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-pub enum ID {
-    Function(CompileUnitID),
-    Struct(CompileUnitID),
-    Type(CompileUnitID),
-}
-
-pub enum CompileStages<U, F> {
-    Untouched(U),
-    // If the counter is down at zero,
-    // we know that it's ready to be finished
-    WaitingOnDependencies(u32, U),
-    Finished(F),
-}
-
-type CompileUnitID = NonZeroU32;
-
-pub struct CompileStageType<U, F> {
-    id_ctr: AtomicU32,
-    values: CHashMap<NonZeroU32, CompileStages<U, F>>,
-}
-
-impl<U, F> CompileStageType<U, F> {
-    pub fn new() -> CompileStageType<U, F> {
-        CompileStageType {
-            id_ctr: AtomicU32::new(1),
-            values: CHashMap::new(),
-        }
-    }
-
-    pub fn insert(&self, value: U) -> CompileUnitID {
-        let id = self.id_ctr.fetch_add(1, Ordering::SeqCst);
-        let id = NonZeroU32::new(id).unwrap();
-
-        let val = self.values.insert(id, CompileStages::Untouched(value));
-        // If the id_ctr works, there should always
-        // be a unique id for every value, so no old
-        // value should exist here!
-        assert!(matches!(val, None));
-
-        id
-    }
-}
-
 pub struct CompileManager {
-    pub namespace: NamespaceManager<ID>,
+    pub namespace_manager: NamespaceManager,
 
-    pub structs: CompileStageType<StructDef, Struct>,
+    pub structs: CIdMap<StructId, StructCompilationUnit>,
 }
 
 impl CompileManager {
     pub fn new() -> CompileManager {
         CompileManager {
-            namespace: NamespaceManager::new(),
-            structs: CompileStageType::new(),
+            namespace_manager: NamespaceManager::new(),
+            structs: CIdMap::new(),
         }
     }
 
     pub fn insert_struct(
         &self,
-        loc: NamespaceID,
-        publicity: Publicity,
-        name: TinyString,
-        def: StructDef,
-    ) -> Result<ID, InsertContentError<ID>> {
-        let id = self.structs.insert(def);
+        namespace_id: NamespaceId,
+        identifier: Identifier,
+        def: DefinedStruct,
+    ) -> Result<StructId, NamespaceError> {
+        let struct_id = self.structs.insert(StructCompilationUnit::Defined(def, Vec::new()));
 
-        self.namespace
-            .insert_member(loc, name, ID::Struct(id), publicity)?;
+        self.namespace_manager.insert_member(
+            namespace_id, 
+            identifier, 
+            Id::Type(TypeId::Struct(struct_id)),
+            AllowAmbiguity::Deny
+            )?;
 
-        Ok(ID::Struct(id))
+        Ok(struct_id)
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum Id {
+    Type(TypeId),
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum TypeId {
+    Struct(StructId),
+}
+
+pub enum StructCompilationUnit {
+    Defined(DefinedStruct, Vec<Id>),
+    Resolved(ResolvedStruct),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Identifier {
-    pub definition: Token,
+    pub pos: SourcePos,
     pub data: TinyString,
 }
 
+create_id!(StructId);
+
 #[derive(Debug)]
-pub struct StructDef {
+pub struct DefinedStruct {
     pub head: Token,
     pub members: Vec<(Identifier, Identifier)>,
 }
 
-pub struct Struct {
-    pub members: Vec<(TinyString, ID)>,
+pub struct ResolvedStruct {
+    pub members: Vec<(Identifier, TypeId)>,
 }

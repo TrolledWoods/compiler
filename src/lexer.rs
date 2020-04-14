@@ -46,6 +46,23 @@ pub enum LexerErrorKind {
     InvalidHexDigit(char),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourcePos {
+    pub file: TinyString,
+    pub start: TextPos,
+    pub end: TextPos,
+}
+
+impl SourcePos {
+    pub fn from_token(token: &Token, file: TinyString) -> SourcePos {
+        SourcePos {
+            file,
+            start: token.start,
+            end: token.end,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub struct TextPos {
     pub line: usize,
@@ -496,19 +513,14 @@ impl Lexer<'_> {
                 }
             }
             Some('"') => {
-                fn unclosed_string_literal(start: TextPos, pos: TextPos) -> LexerError {
-                    LexerError {
-                        kind: LexerErrorKind::UnclosedStringLiteral { pos: pos },
-                        pos: start,
-                    }
-                }
-
                 let start = self.current_pos;
                 self.next_char();
 
                 // Read the string! (i.e. push characters onto it until we find an end)
                 let mut string = String::new();
                 while self.peek_char() != Some('"') {
+                    // "read_possible_escaped_char" will error if the file
+                    // ends
                     string.push(self.read_possibly_escaped_char()?);
                 }
 

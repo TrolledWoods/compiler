@@ -1,10 +1,13 @@
-// #![allow(warnings)]
+#![allow(warnings)]
 use std::sync::Arc;
-use std::path::{ Path, PathBuf };
+use std::path::{ PathBuf };
 
 extern crate chashmap;
 #[macro_use]
 extern crate lazy_static;
+
+#[macro_use]
+mod id;
 
 mod compilation_manager;
 mod keyword;
@@ -13,6 +16,7 @@ mod namespace;
 mod operator;
 mod parser;
 mod string_pile;
+
 // mod types;
 
 pub const SRC_EXTENSION: &str = "txt";
@@ -50,16 +54,11 @@ fn main() {
     src_file_path.pop();
     src_file_path.push(stem);
 
-    let root = manager.namespace.create_root();
-    let mut handles = Vec::new();
+    let root = manager.namespace_manager.insert_root();
     let mut errors = Vec::new();
-    match parser::parse_namespace(&mut parser, false, root, Some((src_file_path, &mut handles))) {
+    match parser::parse_namespace(&mut parser, false, root) {
         Ok(()) => (),
         Err(err) => errors.push(err),
-    }
-
-    for handle in handles {
-        errors.append(&mut handle.join().unwrap());
     }
 
     if errors.len() > 0 {

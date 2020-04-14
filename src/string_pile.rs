@@ -92,39 +92,3 @@ impl std::fmt::Debug for TinyStringReadGuard<'_> {
         write!(f, "{}", &*self)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn string_pile_test() {
-        let tiny: TinyString = "hello".into();
-        assert_eq!(&*tiny.read(), "hello");
-        for i in 0..10 {
-            let i: TinyString = i.to_string().into();
-            assert_ne!(i, tiny);
-        }
-
-        assert_eq!(TinyString::new("hello"), tiny);
-    }
-
-    #[test]
-    fn threading_test() {
-        use std::thread;
-
-        let other = thread::spawn(move || {
-            let a: TinyString = "Hello world".into();
-            let b: TinyString = "Yo".into();
-
-            assert_ne!(a, b, "Thread stuff doesn't work");
-            b
-        });
-
-        let c: TinyString = "Whut".into();
-        let d: TinyString = "Yo".into();
-        let b = other.join().unwrap();
-
-        assert_eq!(d, b, "String from different threads aren't equal");
-    }
-}

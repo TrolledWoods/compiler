@@ -18,6 +18,7 @@ mod operator;
 mod parser;
 mod string_pile;
 mod error;
+mod debug_printing;
 
 // mod types;
 

@@ -3,7 +3,14 @@ Vec2f :: struct {
 	y: f32,
 };
 
-Hi :: "struct {
-	x: f32,
-	y: f32
+Hi :: struct {
+	y: f32,,
 };
+
+
+
+
+
+
+
+

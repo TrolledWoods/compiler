@@ -1,6 +1,7 @@
 use crate::compilation_manager::{Id, Identifier};
 use crate::lexer::SourcePos;
 use crate::string_pile::TinyString;
+use crate::error::{CompileError, ErrorPrintingData};
 
 #[macro_use]
 use crate::id::CIdMap;
@@ -12,10 +13,43 @@ pub enum NamespaceError {
         inserting: (Identifier, Id),
         old_member: NamespaceElement,
     },
-    InvalidAmbiguity {
-        inserting: (Identifier, Id),
-        old_member: NamespaceElement,
-    },
+}
+
+impl CompileError for NamespaceError {
+    fn get_printing_data(self) -> ErrorPrintingData {
+        match self {
+            NamespaceError::DuplicateName { 
+                inserting: (inserting_name, _inserting_id), 
+                old_member 
+            } => {
+                let mut printing_data = ErrorPrintingData::new(
+                    format!("{} already exists in namespace", inserting_name.data))
+                .problem(
+                    inserting_name.pos.clone(), 
+                    format!("Tried adding this to the namespace")
+                );
+
+                match old_member {
+                    NamespaceElement::Singular(name, _id, _) => {
+                        printing_data.problem(
+                            name.pos,
+                            format!("Already defined here")
+                        )
+                    },
+                    NamespaceElement::Ambiguous(elements) => {
+                        for (name, _id) in elements {
+                            printing_data = printing_data.problem(
+                                name.pos,
+                                format!("Already defined here")
+                            )
+                        }
+
+                        printing_data
+                    },
+                }
+            }
+        }
+    }
 }
 
 pub enum NamespaceAccessError {

@@ -126,7 +126,7 @@ impl CompileError for ParseError {
                 ErrorPrintingData::new(message).problem(pos, expected)
             }
             ParseError::Lexer(error) => error.get_printing_data(),
-            ParseError::Namespace(error) => unimplemented!(),
+            ParseError::Namespace(error) => error.get_printing_data(),
         }
     }
 }

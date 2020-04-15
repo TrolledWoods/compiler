@@ -1,19 +1,18 @@
+// * :: other; // Here we import SocietyMember but
+            // it's like implicit, so we can override it even though it's ambiguous
+
+// * :: other_thing; // Maybe ambiguous stuff as well with SocietyMember
+                  // here, society member cannot be accessed, because it's ambiguous with
+				  // another thing of the same "priority"
+
 SocietyMember :: struct {
-    salary: i64,
+    salary: (h),
 	debt: i64,
-	friends: Vec<SocietyMember>,
+	friends: Array
 };
 
-Employee :: struct {
-    name: String,
-    society_member: (SocietyMember, Hi, YouSuck<With, Great, Diligence>),
-	work: (Employee, usize) -> (int),
-	work2: (Employee, usize) -> (int),
-};
+// Here it's no longer ambiguous, we got one defined explicitly
 
-Employee :: struct {
-    name: String,
-    society_member: (SocietyMember, Hi, YouSuck<With, Great, Diligence>),
-	work: (Employee, usize) -> (int),
-	work2: (Employee, usize) -> (int),
-};
+SocietyMember :: struct {  };
+// Here it's ambiguous again, and this gives an error,
+// because ambiguity with explicit imports isn't allowed

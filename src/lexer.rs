@@ -79,7 +79,7 @@ pub enum LexerErrorKind {
     InvalidToken,
     UnclosedStringLiteral { pos: TextPos },
     UnfinishedEscapeCode,
-    BadEscapeCode,
+    InvalidExcapeCode,
     ExpectedChar,
     ManyDecimalPoints,
     InvalidHexU32 { end: TextPos },
@@ -214,6 +214,7 @@ impl Lexer<'_> {
 
     /// Tries to eat a token.
     pub fn eat_token(&mut self) -> Result<Option<Token>, LexerError> {
+        // Make sure that the token is cached
         self.peek_token(0)?;
         Ok(self.peeked_tokens.pop_front())
     }
@@ -270,7 +271,7 @@ impl Lexer<'_> {
                                             });
                                         }
 
-                                        unicode_number = (unicode_number << 4) + digit;
+                                        unicode_number = unicode_number * 16 + digit;
                                     }
                                     None => {
                                         return Err(LexerError {
@@ -304,7 +305,7 @@ impl Lexer<'_> {
                     Some(_) => {
                         return Err(LexerError {
                             file: self.file,
-                            kind: LexerErrorKind::BadEscapeCode,
+                            kind: LexerErrorKind::InvalidExcapeCode,
                             pos: start,
                         })
                     }

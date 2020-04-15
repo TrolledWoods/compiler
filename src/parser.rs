@@ -41,7 +41,6 @@ pub enum ParsingActivity {
     OffloadedType,
     Tuple,
     FunctionPtr,
-
     Constant,
     ConstantValue,
     Namespace,
@@ -161,6 +160,7 @@ pub struct UnexpectedTokenError {
 pub enum ExpectedValue {
     Identifier,
     FileNamespace,
+    Type,
 
     Kind(TokenKind),
 
@@ -175,6 +175,7 @@ impl Display for ExpectedValue {
         match self {
             Identifier => write!(f, "identifier"),
             FileNamespace => write!(f, "namespaced file"),
+            Type => write!(f, "type"),
             Kind(kind) => write!(f, "kind '{:?}'", kind),
             Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
             ClosingBracket(kind) => write!(f, "closing {:?}", kind),
@@ -440,7 +441,6 @@ fn parse_named_list<V>(
             parse_kind(parser, &grammar.separator, activity)?;
         }
     }
-
 }
 
 pub struct ListGrammar {
@@ -614,10 +614,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Type,
-            expected: vec![
-                ExpectedValue::Identifier,
-                ExpectedValue::OpeningBracket(BracketKind::Paren),
-            ],
+            expected: vec![ExpectedValue::Type],
             got: c.into(),
         }
         .into()),

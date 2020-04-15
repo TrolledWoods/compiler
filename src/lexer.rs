@@ -1,7 +1,7 @@
+use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
-use crate::error::{CompileError, ErrorPrintingData};
 use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -38,36 +38,33 @@ impl CompileError for LexerError {
     fn get_printing_data(self) -> ErrorPrintingData {
         use LexerErrorKind::*;
         match self.kind {
-            UnexpectedEndOfFile => 
-                ErrorPrintingData::new(
-                    format!("Unexpected end of file")
-                ).problem(SourcePos {
-                    file: self.file,
-                    start: self.pos,
-                    end: self.pos,
-                }, 
-                format!("Ended here")
+            UnexpectedEndOfFile => ErrorPrintingData::new(format!("Unexpected end of file"))
+                .problem(
+                    SourcePos {
+                        file: self.file,
+                        start: self.pos,
+                        end: self.pos,
+                    },
+                    format!("Ended here"),
                 ),
-            InvalidToken =>
-                ErrorPrintingData::new(
-                    format!("Invalid token"),
-                ).problem(SourcePos {
+            InvalidToken => ErrorPrintingData::new(format!("Invalid token")).problem(
+                SourcePos {
                     file: self.file,
                     start: self.pos,
                     end: self.pos,
                 },
                 format!("Here"),
-                ),
-            UnclosedStringLiteral { pos } =>
-                ErrorPrintingData::new(
-                    format!("String literal isn't closed")
-                ).problem(SourcePos {
-                    file: self.file,
-                    start: self.pos,
-                    end: pos,
-                },
-                format!("String that isn't closed")
-                ),
+            ),
+            UnclosedStringLiteral { pos } => {
+                ErrorPrintingData::new(format!("String literal isn't closed")).problem(
+                    SourcePos {
+                        file: self.file,
+                        start: self.pos,
+                        end: pos,
+                    },
+                    format!("String that isn't closed"),
+                )
+            }
             _ => {
                 println!("{:?}", self);
                 unimplemented!()
@@ -89,7 +86,6 @@ pub enum LexerErrorKind {
     InvalidUnicode(u32),
     InvalidHexDigit(char),
 }
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourcePos {
@@ -582,10 +578,10 @@ impl Lexer<'_> {
                     if self.peek_char() == None {
                         return Err(LexerError {
                             file: self.file,
-                            kind: LexerErrorKind::UnclosedStringLiteral { 
-                                pos: self.current_pos
+                            kind: LexerErrorKind::UnclosedStringLiteral {
+                                pos: self.current_pos,
                             },
-                            pos: start
+                            pos: start,
                         });
                     }
                     string.push(self.read_possibly_escaped_char()?);

@@ -1,14 +1,14 @@
-use crate::lexer::{ Token, SourcePos };
-use crate::namespace::{NamespaceId, AllowAmbiguity, NamespaceError, NamespaceManager};
-use crate::string_pile::TinyString;
 use crate::id::CIdMap;
+use crate::lexer::{SourcePos, Token};
+use crate::namespace::{AllowAmbiguity, NamespaceError, NamespaceId, NamespaceManager};
+use crate::string_pile::TinyString;
 // TODO: Move the type stuff into types.rs
 use crate::types::TypeDef;
 use chashmap::CHashMap;
 use std::collections::HashSet;
+use std::fmt::{self, Display, Formatter};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::fmt::{self, Display, Formatter};
 
 pub struct CompileManager {
     pub namespace_manager: NamespaceManager,
@@ -30,14 +30,16 @@ impl CompileManager {
         identifier: Identifier,
         def: DefinedStruct,
     ) -> Result<StructId, NamespaceError> {
-        let struct_id = self.structs.insert(StructCompilationUnit::Defined(def, Vec::new()));
+        let struct_id = self
+            .structs
+            .insert(StructCompilationUnit::Defined(def, Vec::new()));
 
         self.namespace_manager.insert_member(
-            namespace_id, 
-            identifier, 
+            namespace_id,
+            identifier,
             Id::Type(TypeId::Struct(struct_id)),
-            AllowAmbiguity::Deny
-            )?;
+            AllowAmbiguity::Deny,
+        )?;
 
         Ok(struct_id)
     }
@@ -76,7 +78,9 @@ impl Display for DefinedStruct {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "struct (")?;
         for (i, (ident, type_def)) in self.members.iter().enumerate() {
-            if i != 0 { write!(f, ", ")?; }
+            if i != 0 {
+                write!(f, ", ")?;
+            }
             write!(f, "{}: {}", ident.data, type_def)?;
         }
         write!(f, ")")?;

@@ -1,5 +1,5 @@
+use crate::debug_printing::{pretty_print_feedback, FeedbackLog, LogPosition};
 use crate::lexer::SourcePos;
-use crate::debug_printing::{FeedbackLog, LogPosition, pretty_print_feedback};
 use ansi_term::Color;
 
 pub trait CompileError {

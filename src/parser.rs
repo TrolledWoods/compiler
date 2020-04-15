@@ -1,16 +1,16 @@
-use crate::compilation_manager::{CompileManager, Identifier, DefinedStruct, Id};
+use crate::compilation_manager::{CompileManager, DefinedStruct, Id, Identifier};
+use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
-use crate::lexer::{SourcePos, BracketKind, Lexer, LexerError, TextPos, Token, TokenKind};
+use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, TokenKind};
 use crate::namespace::{NamespaceError, NamespaceId, NamespaceManager};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
+use crate::types::{FunctionHeader, TypeDef, TypeKind};
 use crate::SRC_EXTENSION;
-use crate::error::{CompileError, ErrorPrintingData};
-use crate::types::{TypeDef, TypeKind, FunctionHeader};
-use std::fmt::{self, Formatter, Display};
-use std::thread::{self, JoinHandle};
+use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 
 pub struct Parser<'a> {
     pub manager: Arc<CompileManager>,
@@ -103,11 +103,11 @@ impl CompileError for ParseError {
                     GotAsToken::Some(token) => SourcePos {
                         file: error.file,
                         start: token.start,
-                        end: token.end
+                        end: token.end,
                     },
                     GotAsToken::None => SourcePos {
                         file: error.file,
-                        start: TextPos::end_of_file(), 
+                        start: TextPos::end_of_file(),
                         end: TextPos::end_of_file(),
                     },
                 };
@@ -116,22 +116,17 @@ impl CompileError for ParseError {
                 for (i, value) in error.expected.iter().enumerate() {
                     let addition = if i > 0 {
                         format!(", {}", value)
-                    }else {
+                    } else {
                         format!("{}", value)
                     };
 
                     expected.push_str(&addition);
                 }
 
-                ErrorPrintingData::new(message)
-                    .problem(pos, expected)
-            },
-            ParseError::Lexer(error) => {
-                error.get_printing_data()
-            },
-            ParseError::Namespace(error) => {
-                unimplemented!()
-            },
+                ErrorPrintingData::new(message).problem(pos, expected)
+            }
+            ParseError::Lexer(error) => error.get_printing_data(),
+            ParseError::Namespace(error) => unimplemented!(),
         }
     }
 }
@@ -226,24 +221,26 @@ pub fn parse_namespace(
             activity: ParsingActivity::Namespace,
             expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
             got: GotAsToken::None,
-        }.into())
+        }
+        .into())
     }
 }
 
 fn parse_kind(
     parser: &mut Parser<'_>,
-    kind: TokenKind,
+    kind: &TokenKind,
     doing: ParsingActivity,
 ) -> Result<Token, ParseError> {
     let token = parser.eat_token(doing)?;
     match &token {
-        Some(Token { kind: kind_, .. }) if *kind_ == kind => Ok(token.unwrap()),
+        Some(Token { kind: kind_, .. }) if kind_ == kind => Ok(token.unwrap()),
         _ => Err(UnexpectedTokenError {
             file: parser.file,
             activity: doing,
-            expected: vec![ExpectedValue::Kind(kind)],
+            expected: vec![ExpectedValue::Kind(kind.clone())],
             got: token.into(),
-        }.into()),
+        }
+        .into()),
     }
 }
 
@@ -263,7 +260,8 @@ fn parse_keyword(
             activity: doing,
             expected: vec![ExpectedValue::Keyword(keyword)],
             got: token.into(),
-        }.into()),
+        }
+        .into()),
     }
 }
 
@@ -320,7 +318,8 @@ pub fn parse_identifier(
             activity: doing,
             expected: vec![ExpectedValue::Identifier],
             got: token.into(),
-        }.into()),
+        }
+        .into()),
     }
 }
 
@@ -335,7 +334,7 @@ pub fn parse_constant_definition(
     // Expect a constant assignment
     let assign_op = parse_kind(
         parser,
-        TokenKind::Operator {
+        &TokenKind::Operator {
             kind: OpKind::Constant,
             is_assignment: false,
         },
@@ -372,7 +371,7 @@ pub fn parse_constant_definition(
 
     // Even const expressions have to have semicolons.
     // (Mostly for consistancy reasons)
-    parse_kind(parser, TokenKind::Terminator, ParsingActivity::Constant)?;
+    parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
 
     Ok(())
 }
@@ -386,44 +385,62 @@ pub fn parse_constant_definition(
 /// be "eaten"
 fn parse_named_list<V>(
     parser: &mut Parser,
+    grammar: ListGrammar,
     mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
-    terminator: TokenKind,
     activity: ParsingActivity,
-) -> Result<Vec<(Identifier, V)>, ParseError> {
+) -> Result<(SourcePos, Vec<(Identifier, V)>), ParseError> {
+    let start = if let Some(start) = try_parse_kind(parser, &grammar.start, activity)? {
+        start.start
+    } else {
+        return Err(UnexpectedTokenError {
+            file: parser.file,
+            activity,
+            expected: vec![ExpectedValue::Kind(grammar.start)],
+            got: parser.peek_token(activity, 0)?.into(),
+        }
+        .into());
+    };
+
     // Read the members
     let mut members = Vec::new();
     loop {
-        // Read member name / terminator
-        if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
-            break;
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+            return Ok((
+                SourcePos {
+                    file: parser.file,
+                    start,
+                    end: terminator.end,
+                },
+                members,
+            ));
         }
-        let name = parse_identifier(parser, activity)?;
 
-        // Read in a ':'
+        let name = parse_identifier(parser, activity)?;
         let _colon = parse_kind(
             parser,
-            TokenKind::Operator {
+            &TokenKind::Operator {
                 kind: OpKind::Declaration,
                 is_assignment: false,
             },
             activity,
         )?;
-
-        // Parse the value
         let value = parse_value(parser)?;
-
-        // We know enough information to do this now
         members.push((name, value));
 
-        // Read a separator or the terminator
-        if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
-            break;
-        }else {
-            parse_kind(parser, TokenKind::Separator, activity)?;
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+            return Ok((
+                SourcePos {
+                    file: parser.file,
+                    start,
+                    end: terminator.end,
+                },
+                members,
+            ));
+        } else {
+            parse_kind(parser, &grammar.separator, activity)?;
         }
     }
 
-    Ok(members)
 }
 
 pub struct ListGrammar {
@@ -459,9 +476,15 @@ impl ListGrammar {
 
     pub fn angle() -> ListGrammar {
         ListGrammar {
-            start: TokenKind::Operator { kind: OpKind::Less, is_assignment: false },
+            start: TokenKind::Operator {
+                kind: OpKind::Less,
+                is_assignment: false,
+            },
             separator: TokenKind::Separator,
-            end: TokenKind::Operator { kind: OpKind::Greater, is_assignment: false },
+            end: TokenKind::Operator {
+                kind: OpKind::Greater,
+                is_assignment: false,
+            },
         }
     }
 }
@@ -475,10 +498,10 @@ fn try_parse_list<V>(
     if let Some(Token { kind, .. }) = parser.peek_token(activity, 0)? {
         if kind == grammar.start {
             Ok(Some(parse_list(parser, grammar, parse_value, activity)?))
-        }else {
+        } else {
             Ok(None)
         }
-    }else {
+    } else {
         Ok(None)
     }
 }
@@ -489,42 +512,44 @@ fn parse_list<V>(
     mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
     activity: ParsingActivity,
 ) -> Result<(SourcePos, Vec<V>), ParseError> {
-    // Read the beginning token
-    let start = if let Some(start) 
-            = try_parse_kind(parser, &grammar.start, activity)? {
+    let start = if let Some(start) = try_parse_kind(parser, &grammar.start, activity)? {
         start.start
-    }else{
+    } else {
         return Err(UnexpectedTokenError {
             file: parser.file,
             activity,
             expected: vec![ExpectedValue::Kind(grammar.start)],
             got: parser.peek_token(activity, 0)?.into(),
-        }.into());
+        }
+        .into());
     };
 
     let mut members = Vec::new();
     loop {
         if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
-            return Ok((SourcePos {
-                file: parser.file,
-                start,
-                end: terminator.end,
-            }, members));
+            return Ok((
+                SourcePos {
+                    file: parser.file,
+                    start,
+                    end: terminator.end,
+                },
+                members,
+            ));
         }
 
-        // Parse the value
-        let value = parse_value(parser)?;
-        members.push(value);
+        members.push(parse_value(parser)?);
 
-        // Read a separator or the terminator
         if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
-            return Ok((SourcePos {
-                file: parser.file,
-                start,
-                end: terminator.end,
-            }, members));
-        }else {
-            parse_kind(parser, TokenKind::Separator, activity)?;
+            return Ok((
+                SourcePos {
+                    file: parser.file,
+                    start,
+                    end: terminator.end,
+                },
+                members,
+            ));
+        } else {
+            parse_kind(parser, &grammar.separator, activity)?;
         }
     }
 }
@@ -533,17 +558,11 @@ fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
     // Used for error messages
     let head = parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
 
-    parse_kind(
-        parser,
-        TokenKind::OpeningBracket(BracketKind::Curly),
-        ParsingActivity::Struct,
-    )?;
-
     // Parse the named list of types
-    let members = parse_named_list(
+    let (_, members) = parse_named_list(
         parser,
+        ListGrammar::curly(),
         |parser| parse_type(parser),
-        TokenKind::ClosingBracket(BracketKind::Curly),
         ParsingActivity::StructMember,
     )?;
 
@@ -552,14 +571,22 @@ fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
 
 fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     match parser.peek_token(ParsingActivity::Type, 0)? {
-        Some(Token { kind: TokenKind::Identifier(data), .. }) => 
-                parse_offloaded_type(parser),
-        Some(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), .. }) => {
+        Some(Token {
+            kind: TokenKind::Identifier(data),
+            ..
+        }) => parse_offloaded_type(parser),
+        Some(Token {
+            kind: TokenKind::OpeningBracket(BracketKind::Paren),
+            ..
+        }) => {
             let (pos, tuple) = parse_tuple_type(parser)?;
 
             if let Some(_) = try_parse_kind(
-                parser, 
-                &TokenKind::Operator { kind:OpKind::ReturnArrow, is_assignment: false },
+                parser,
+                &TokenKind::Operator {
+                    kind: OpKind::ReturnArrow,
+                    is_assignment: false,
+                },
                 ParsingActivity::FunctionPtr,
             )? {
                 // This is a function pointer!
@@ -574,9 +601,9 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
                     kind: TypeKind::FunctionPtr(FunctionHeader {
                         args: tuple,
                         returns: return_tuple,
-                    })
+                    }),
                 })
-            }else {
+            } else {
                 // This is just a tuple
                 Ok(TypeDef {
                     pos,
@@ -588,19 +615,22 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
             file: parser.file,
             activity: ParsingActivity::Type,
             expected: vec![
-                ExpectedValue::Identifier, 
-                ExpectedValue::OpeningBracket(BracketKind::Paren)
+                ExpectedValue::Identifier,
+                ExpectedValue::OpeningBracket(BracketKind::Paren),
             ],
             got: c.into(),
-        }.into()),
+        }
+        .into()),
     }
 }
 
 fn parse_tuple_type(parser: &mut Parser) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
-    let (pos, members) = parse_list(parser,
-                ListGrammar::parenthesis(),
-               parse_type,
-               ParsingActivity::Tuple)?;
+    let (pos, members) = parse_list(
+        parser,
+        ListGrammar::parenthesis(),
+        parse_type,
+        ParsingActivity::Tuple,
+    )?;
 
     Ok((pos, members))
 }
@@ -612,22 +642,21 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
         parser,
         ListGrammar::angle(),
         parse_type,
-        ParsingActivity::OffloadedType
+        ParsingActivity::OffloadedType,
     )? {
-        Some((generics_pos, list)) => 
-            (SourcePos {
+        Some((generics_pos, list)) => (
+            SourcePos {
                 file: parser.file,
                 start: name.pos.start,
                 end: generics_pos.end,
-            }, list),
+            },
+            list,
+        ),
         None => (name.pos.clone(), vec![]),
     };
 
-    Ok(TypeDef { 
-        pos, 
-        kind: TypeKind::Offload {
-            name,
-            generics,
-        }
+    Ok(TypeDef {
+        pos,
+        kind: TypeKind::Offload { name, generics },
     })
 }

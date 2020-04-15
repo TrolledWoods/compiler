@@ -1,6 +1,6 @@
 // #![allow(warnings)]
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::path::{ PathBuf };
 
 extern crate ansi_term;
 extern crate chashmap;
@@ -11,14 +11,14 @@ extern crate lazy_static;
 mod id;
 
 mod compilation_manager;
+mod debug_printing;
+mod error;
 mod keyword;
 mod lexer;
 mod namespace;
 mod operator;
 mod parser;
 mod string_pile;
-mod error;
-mod debug_printing;
 mod types;
 
 pub const SRC_EXTENSION: &str = "txt";
@@ -38,7 +38,6 @@ fn main() {
 
     assert_eq!(args.next(), None, "Too many console arguments passed!");
 
-
     println!("{:?}", src_file_path);
 
     let input = std::fs::read_to_string(&src_file_path).unwrap();
@@ -48,7 +47,10 @@ fn main() {
 
     let mut parser = parser::Parser {
         manager: manager.clone(),
-        file: src_file_path.to_str().expect("String conversion not possible :<").into(),
+        file: src_file_path
+            .to_str()
+            .expect("String conversion not possible :<")
+            .into(),
         tokens: lexer,
     };
 

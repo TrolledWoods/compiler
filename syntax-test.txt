@@ -8,4 +8,5 @@ Employee :: struct {
     name: String,
     society_member: (SocietyMember, Hi, YouSuck<With, Great, Diligence>),
 	work: (Employee, usize) -> (int),
+	work2: (Employee, usize) -> (int),
 };

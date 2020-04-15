@@ -1,6 +1,6 @@
-use crate::string_pile::TinyString;
 use crate::compilation_manager::Identifier;
 use crate::lexer::SourcePos;
+use crate::string_pile::TinyString;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug)]
@@ -17,8 +17,8 @@ impl Display for TypeDef {
 
 #[derive(Debug)]
 pub enum TypeKind {
-    Offload{
-        name: Identifier, 
+    Offload {
+        name: Identifier,
         generics: Vec<TypeDef>,
     },
     Tuple(Vec<TypeDef>),
@@ -31,22 +31,26 @@ impl Display for TypeKind {
         match self {
             Offload { name, generics } => {
                 write!(f, "{}<", name.data)?;
-                
+
                 for (i, generic) in generics.iter().enumerate() {
-                    if i != 0 { write!(f, ", ")?; }
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", generic)?;
                 }
 
                 write!(f, ">")?;
-            },
+            }
             Tuple(members) => {
                 write!(f, "(")?;
                 for (i, member) in members.iter().enumerate() {
-                    if i != 0 { write!(f, ", ")?; }
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", member)?;
                 }
                 write!(f, ")")?;
-            },
+            }
             FunctionPtr(header) => write!(f, "{}", header)?,
         }
 
@@ -64,12 +68,16 @@ impl Display for FunctionHeader {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
         for (i, member) in self.args.iter().enumerate() {
-            if i != 0 { write!(f, ", ")?; }
+            if i != 0 {
+                write!(f, ", ")?;
+            }
             write!(f, "{}", member)?;
         }
         write!(f, ") -> (")?;
         for (i, member) in self.returns.iter().enumerate() {
-            if i != 0 { write!(f, ", ")?; }
+            if i != 0 {
+                write!(f, ", ")?;
+            }
             write!(f, "{}", member)?;
         }
         write!(f, ")")?;

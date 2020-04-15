@@ -1,5 +1,5 @@
+use crate::compilation_manager::{Id, Identifier};
 use crate::lexer::SourcePos;
-use crate::compilation_manager::{Identifier, Id};
 use crate::string_pile::TinyString;
 
 #[macro_use]
@@ -9,13 +9,13 @@ use chashmap::CHashMap;
 #[derive(Clone, Debug, PartialEq)]
 pub enum NamespaceError {
     DuplicateName {
-        inserting: (Identifier, Id), 
+        inserting: (Identifier, Id),
         old_member: NamespaceElement,
     },
     InvalidAmbiguity {
         inserting: (Identifier, Id),
         old_member: NamespaceElement,
-    }
+    },
 }
 
 pub enum NamespaceAccessError {
@@ -49,11 +49,11 @@ impl NamespaceManager {
     }
 
     pub fn insert_member(
-        &self, 
-        _parent: NamespaceId, 
-        name: Identifier, 
+        &self,
+        _parent: NamespaceId,
+        name: Identifier,
         member_id: Id,
-        is_ambiguity_allowed: AllowAmbiguity, 
+        is_ambiguity_allowed: AllowAmbiguity,
     ) -> Result<(), NamespaceError> {
         match self.name_map.get_mut(&name.data) {
             // Something already exists there,
@@ -68,7 +68,9 @@ impl NamespaceManager {
                     NamespaceElement::Ambiguous(_) => AllowAmbiguity::Allow,
                 };
 
-                if is_ambiguity_allowed == AllowAmbiguity::Deny || old_ambiguity == AllowAmbiguity::Deny { 
+                if is_ambiguity_allowed == AllowAmbiguity::Deny
+                    || old_ambiguity == AllowAmbiguity::Deny
+                {
                     return Err(NamespaceError::DuplicateName {
                         inserting: (name, member_id),
                         old_member: old_member.clone(),
@@ -79,35 +81,45 @@ impl NamespaceManager {
                 // the ambiguity
                 match &mut old_member as &mut NamespaceElement {
                     NamespaceElement::Singular(old_pos, old_id, _) => {
-                        *old_member = NamespaceElement::Ambiguous(vec![(old_pos.clone(), *old_id), (name, member_id)]);
-                    },
+                        *old_member = NamespaceElement::Ambiguous(vec![
+                            (old_pos.clone(), *old_id),
+                            (name, member_id),
+                        ]);
+                    }
                     NamespaceElement::Ambiguous(members) => {
                         members.push((name, member_id));
-                    },
+                    }
                 }
 
                 Ok(())
-            },
-            // Nothing existed there before, 
+            }
+            // Nothing existed there before,
             // so a new member is inserted
             None => {
-                let old_member = self.name_map.insert(name.data, NamespaceElement::Singular(name, member_id, is_ambiguity_allowed));
+                let old_member = self.name_map.insert(
+                    name.data,
+                    NamespaceElement::Singular(name, member_id, is_ambiguity_allowed),
+                );
                 assert!(matches!(old_member, None));
 
                 Ok(())
-            },
+            }
         }
     }
 
-    pub fn get_member(&self, _parent: NamespaceId, name: TinyString) -> Result<(SourcePos, Id), NamespaceAccessError> {
+    pub fn get_member(
+        &self,
+        _parent: NamespaceId,
+        name: TinyString,
+    ) -> Result<(SourcePos, Id), NamespaceAccessError> {
         match self.name_map.get(&name) {
-            Some(element) => {
-                match &element as &NamespaceElement {
-                    NamespaceElement::Singular(name, value, _) => Ok((name.pos.clone(), value.clone())),
-                    NamespaceElement::Ambiguous(values) => Err(NamespaceAccessError::Ambiguous(values.clone()))
+            Some(element) => match &element as &NamespaceElement {
+                NamespaceElement::Singular(name, value, _) => Ok((name.pos.clone(), value.clone())),
+                NamespaceElement::Ambiguous(values) => {
+                    Err(NamespaceAccessError::Ambiguous(values.clone()))
                 }
             },
-            None => Err(NamespaceAccessError::DoesNotExist), 
+            None => Err(NamespaceAccessError::DoesNotExist),
         }
     }
 
@@ -116,9 +128,14 @@ impl NamespaceManager {
         NamespaceId::new(1)
     }
 
-    pub fn insert_namespace(&self, _parent: NamespaceId, _name: Option<TinyString>, _pos: SourcePos) -> Result<NamespaceId, NamespaceError> {
+    pub fn insert_namespace(
+        &self,
+        _parent: NamespaceId,
+        _name: Option<TinyString>,
+        _pos: SourcePos,
+    ) -> Result<NamespaceId, NamespaceError> {
         Ok(NamespaceId::new(1))
     }
-} 
+}
 
 create_id!(NamespaceId);

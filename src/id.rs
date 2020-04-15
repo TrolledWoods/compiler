@@ -1,7 +1,7 @@
-use std::sync::atomic::{ AtomicU32, Ordering };
+use chashmap::{CHashMap, ReadGuard, WriteGuard};
 use std::hash::Hash;
 use std::num::NonZeroU32;
-use chashmap::{CHashMap, ReadGuard, WriteGuard};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub trait Id: Hash + Copy + PartialEq {
     fn into_raw(self) -> NonZeroU32;
@@ -23,17 +23,21 @@ macro_rules! create_id {
         }
 
         impl crate::id::Id for $name {
-            fn into_raw(self) -> std::num::NonZeroU32 { self.0 }
-            fn from_raw(other: std::num::NonZeroU32) -> Self { $name(other) }
+            fn into_raw(self) -> std::num::NonZeroU32 {
+                self.0
+            }
+            fn from_raw(other: std::num::NonZeroU32) -> Self {
+                $name(other)
+            }
         }
-    }
+    };
 }
 
 // TODO: Make a non concurrent element map?
 
 pub struct CIdMap<I: Id, D> {
     ctr: AtomicU32,
-    data: CHashMap<I, D>, 
+    data: CHashMap<I, D>,
 }
 
 impl<I: Id, D> CIdMap<I, D> {

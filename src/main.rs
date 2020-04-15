@@ -21,7 +21,7 @@ mod parser;
 mod string_pile;
 mod types;
 
-pub const SRC_EXTENSION: &str = "txt";
+pub const SRC_EXTENSION: &str = "gai";
 
 fn main() {
     let mut args = std::env::args();
@@ -38,37 +38,19 @@ fn main() {
 
     assert_eq!(args.next(), None, "Too many console arguments passed!");
 
-    println!("{:?}", src_file_path);
-
-    let input = std::fs::read_to_string(&src_file_path).unwrap();
-
-    let mut lexer = lexer::Lexer::new(src_file_path.to_str().unwrap().into(), &input);
     let manager = Arc::new(compilation_manager::CompileManager::new());
 
-    let mut parser = parser::Parser {
-        manager: manager.clone(),
-        file: src_file_path
-            .to_str()
-            .expect("String conversion not possible :<")
-            .into(),
-        tokens: lexer,
-    };
-
-    let stem = PathBuf::from(src_file_path.file_stem().unwrap());
-    src_file_path.pop();
-    src_file_path.push(stem);
-
+    // Parsing step
     let root = manager.namespace_manager.insert_root();
     let mut errors = Vec::new();
-    match parser::parse_namespace(&mut parser, false, root) {
-        Ok(()) => (),
-        Err(err) => errors.push(err),
+    if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), namespace::NamespaceId::new(1)) {
+        errors.push(err);
     }
 
     if errors.len() > 0 {
         use crate::error::CompileError;
 
-        println!("There were errors!");
+        println!("There were errors while parsing!\n");
 
         for error in errors {
             error.get_printing_data().print();
@@ -77,12 +59,10 @@ fn main() {
         return;
     }
 
-    std::mem::drop(parser);
-
-    // Down here we should be the sole owner of the manager(because parse_namespace should join the
-    // child thread it spawns
     let owned_manager = match Arc::try_unwrap(manager) {
         Ok(value) => value,
         Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
     };
+
+    // Now we have parsed everything.
 }

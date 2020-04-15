@@ -90,6 +90,7 @@ pub enum ParseError {
     UnexpectedToken(UnexpectedTokenError),
     Lexer(LexerError),
     Namespace(NamespaceError),
+    IoError(String, std::io::Error),
 }
 
 impl CompileError for ParseError {
@@ -126,6 +127,9 @@ impl CompileError for ParseError {
             }
             ParseError::Lexer(error) => error.get_printing_data(),
             ParseError::Namespace(error) => error.get_printing_data(),
+            ParseError::IoError(file, error) => {
+                ErrorPrintingData::new(format!("Error loading file '{}', \n io error: {}", file, error))
+            },
         }
     }
 }
@@ -184,13 +188,40 @@ impl Display for ExpectedValue {
     }
 }
 
+pub fn parse_file(
+    file: &Path,
+    manager: Arc<CompileManager>,
+    // TODO: Pass thread pool / task pool into here
+    namespace_id: NamespaceId,
+) -> Result<(), ParseError> {
+    let input = match std::fs::read_to_string(&file) {
+        Ok(val) => val,
+        Err(io_error) => return Err(
+            ParseError::IoError(
+                file.to_str().unwrap().into(), 
+                io_error
+            )
+        ),
+    };
+    let mut lexer = Lexer::new(
+        file.to_str()
+            .expect("Cannot turn file path into string")
+            .into(), 
+        &input
+    );
+    let mut parser = Parser {
+        manager,
+        file: file
+            .to_str()
+            .expect("String conversion not possible :<")
+            .into(),
+        tokens: lexer,
+    };
+
+    parse_namespace(&mut parser, false, namespace_id)
+}
+
 /// Just parses a namespace.
-/// Namespaces ONLY contain
-/// constants, and the order
-/// of the constants should never matter,
-/// not even which file they are in
-/// should matter(other than what namespace
-/// they reside in).
 /// No opening bracket is expected, but if the
 /// `in_block` parameter is true, we expect a
 /// closing bracket.
@@ -351,8 +382,6 @@ pub fn parse_constant_definition(
             end,
         }) => {
             let s = parse_struct(parser)?;
-
-            println!("{}", &s);
             parser.manager.insert_struct(namespace_id, identifier, s)?;
         }
         _ => {

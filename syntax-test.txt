@@ -1,16 +1,3 @@
-Vec2f :: struct {
-  x: (String, f32),
-  y: f32,
+Ifjaisjf :: struct {
+
 };
-
-Hi :: struct {
-  y: Vec<f32>,
-};
-
-
-
-
-
-
-
-

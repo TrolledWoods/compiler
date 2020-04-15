@@ -40,6 +40,7 @@ pub enum ParsingActivity {
     Type,
     OffloadedType,
     Tuple,
+    FunctionPtr,
 
     Constant,
     ConstantValue,
@@ -57,6 +58,7 @@ impl Display for ParsingActivity {
             Type => write!(f, "type"),
             OffloadedType => write!(f, "offloaded type"),
             Tuple => write!(f, "tuple"),
+            FunctionPtr => write!(f, "function pointer"),
             Constant => write!(f, "constant"),
             ConstantValue => write!(f, "constant value"),
             Namespace => write!(f, "namespace"),
@@ -484,8 +486,36 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     match parser.peek_token(ParsingActivity::Type, 0)? {
         Some(Token { kind: TokenKind::Identifier(data), .. }) => 
                 parse_offloaded_type(parser),
-        Some(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), .. }) => 
-                parse_tuple_type(parser),
+        Some(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), .. }) => {
+            let (pos, tuple) = parse_tuple_type(parser)?;
+
+            if let Some(_) = try_parse_kind(
+                parser, 
+                &TokenKind::Operator { kind:OpKind::ReturnArrow, is_assignment: false },
+                ParsingActivity::FunctionPtr,
+            )? {
+                // This is a function pointer!
+                let (return_pos, return_tuple) = parse_tuple_type(parser)?;
+
+                Ok(TypeDef {
+                    pos: SourcePos {
+                        file: parser.file,
+                        start: pos.start,
+                        end: return_pos.end,
+                    },
+                    kind: TypeKind::FunctionPtr(FunctionHeader {
+                        args: tuple,
+                        returns: return_tuple,
+                    })
+                })
+            }else {
+                // This is just a tuple
+                Ok(TypeDef {
+                    pos,
+                    kind: TypeKind::Tuple(tuple),
+                })
+            }
+        }
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Type,
@@ -498,7 +528,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     }
 }
 
-fn parse_tuple_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+fn parse_tuple_type(parser: &mut Parser) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
     let paren = parse_kind(parser, TokenKind::OpeningBracket(BracketKind::Paren), ParsingActivity::Tuple)?;
 
     let (pos, members) = parse_list(parser,
@@ -507,10 +537,7 @@ fn parse_tuple_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
                TokenKind::ClosingBracket(BracketKind::Paren),
                ParsingActivity::Tuple)?;
 
-    Ok(TypeDef {
-        pos,
-        kind: TypeKind::Tuple(members),
-    })
+    Ok((pos, members))
 }
 
 fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {

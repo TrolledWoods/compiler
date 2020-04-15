@@ -1,4 +1,3 @@
-// #![allow(warnings)]
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,7 +27,7 @@ fn main() {
 
     args.next();
 
-    let mut src_file_path = match args.next() {
+    let src_file_path = match args.next() {
         Some(value) => PathBuf::from(value),
         None => {
             println!("Please give the path to the file you want to compile");
@@ -43,7 +42,11 @@ fn main() {
     // Parsing step
     let root = manager.namespace_manager.insert_root();
     let mut errors = Vec::new();
-    if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), namespace::NamespaceId::new(1)) {
+    if let Err(err) = parser::parse_file(
+        &src_file_path,
+        manager.clone(),
+        namespace::NamespaceId::new(1),
+    ) {
         errors.push(err);
     }
 
@@ -59,7 +62,7 @@ fn main() {
         return;
     }
 
-    let owned_manager = match Arc::try_unwrap(manager) {
+    let _owned_manager = match Arc::try_unwrap(manager) {
         Ok(value) => value,
         Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
     };

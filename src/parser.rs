@@ -34,7 +34,6 @@ impl Parser<'_> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsingActivity {
-    Debug,
     Struct,
     StructMember,
     Type,
@@ -51,7 +50,6 @@ impl Display for ParsingActivity {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use ParsingActivity::*;
         match self {
-            Debug => write!(f, "COMPILER DEBBUGING THING"),
             Struct => write!(f, "struct"),
             StructMember => write!(f, "struct member"),
             Type => write!(f, "type"),
@@ -127,9 +125,10 @@ impl CompileError for ParseError {
             }
             ParseError::Lexer(error) => error.get_printing_data(),
             ParseError::Namespace(error) => error.get_printing_data(),
-            ParseError::IoError(file, error) => {
-                ErrorPrintingData::new(format!("Error loading file '{}', \n io error: {}", file, error))
-            },
+            ParseError::IoError(file, error) => ErrorPrintingData::new(format!(
+                "Error loading file '{}', \n io error: {}",
+                file, error
+            )),
         }
     }
 }
@@ -165,6 +164,7 @@ pub enum ExpectedValue {
     Identifier,
     FileNamespace,
     Type,
+    ConstantDefinitionValue,
 
     Kind(TokenKind),
 
@@ -180,6 +180,7 @@ impl Display for ExpectedValue {
             Identifier => write!(f, "identifier"),
             FileNamespace => write!(f, "namespaced file"),
             Type => write!(f, "type"),
+            ConstantDefinitionValue => write!(f, "constant definition value"),
             Kind(kind) => write!(f, "kind '{:?}'", kind),
             Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
             ClosingBracket(kind) => write!(f, "closing {:?}", kind),
@@ -196,18 +197,13 @@ pub fn parse_file(
 ) -> Result<(), ParseError> {
     let input = match std::fs::read_to_string(&file) {
         Ok(val) => val,
-        Err(io_error) => return Err(
-            ParseError::IoError(
-                file.to_str().unwrap().into(), 
-                io_error
-            )
-        ),
+        Err(io_error) => return Err(ParseError::IoError(file.to_str().unwrap().into(), io_error)),
     };
-    let mut lexer = Lexer::new(
+    let lexer = Lexer::new(
         file.to_str()
             .expect("Cannot turn file path into string")
-            .into(), 
-        &input
+            .into(),
+        &input,
     );
     let mut parser = Parser {
         manager,
@@ -378,8 +374,7 @@ pub fn parse_constant_definition(
     match token {
         Some(Token {
             kind: TokenKind::Keyword(Keyword::Struct),
-            start,
-            end,
+            ..
         }) => {
             let s = parse_struct(parser)?;
             parser.manager.insert_struct(namespace_id, identifier, s)?;
@@ -388,12 +383,7 @@ pub fn parse_constant_definition(
             Err(UnexpectedTokenError {
                 file: parser.file,
                 activity: ParsingActivity::ConstantValue,
-                expected: vec![
-                    ExpectedValue::OpeningBracket(BracketKind::Paren),
-                    ExpectedValue::OpeningBracket(BracketKind::Curly),
-                    ExpectedValue::Keyword(Keyword::Struct),
-                    ExpectedValue::Identifier,
-                ],
+                expected: vec![ExpectedValue::ConstantDefinitionValue],
                 got: token.into(),
             })?;
         }
@@ -487,13 +477,13 @@ impl ListGrammar {
         }
     }
 
-    pub fn square() -> ListGrammar {
-        ListGrammar {
-            start: TokenKind::OpeningBracket(BracketKind::Brack),
-            separator: TokenKind::Separator,
-            end: TokenKind::ClosingBracket(BracketKind::Brack),
-        }
-    }
+    // pub fn square() -> ListGrammar {
+    //     ListGrammar {
+    //         start: TokenKind::OpeningBracket(BracketKind::Brack),
+    //         separator: TokenKind::Separator,
+    //         end: TokenKind::ClosingBracket(BracketKind::Brack),
+    //     }
+    // }
 
     pub fn curly() -> ListGrammar {
         ListGrammar {

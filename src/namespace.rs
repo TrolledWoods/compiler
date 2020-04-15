@@ -1,10 +1,8 @@
 use crate::compilation_manager::{Id, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
+use crate::id::CIdMap;
 use crate::lexer::SourcePos;
 use crate::string_pile::TinyString;
-
-#[macro_use]
-use crate::id::CIdMap;
 use chashmap::CHashMap;
 
 #[derive(Clone, Debug, PartialEq)]

@@ -14,6 +14,10 @@ macro_rules! create_id {
         pub struct $name(std::num::NonZeroU32);
 
         impl $name {
+            // So that we don't get a friggin warning
+            // for every id type that doesn't use the new method.
+            // Some id types do, for those we DO want this method!
+            #[allow(dead_code)]
             pub fn new(value: u32) -> $name {
                 use std::num::NonZeroU32;
 

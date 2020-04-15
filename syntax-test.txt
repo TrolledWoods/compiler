@@ -1,3 +1,11 @@
-Ifjaisjf :: struct {
+SocietyMember :: struct {
+    salary: i64,
+	debt: i64,
+	friends: Vec<SocietyMember>,
+};
 
+Employee :: struct {
+    name: String,
+    society_member: (SocietyMember, Hi, YouSuck<With, Great, Diligence>),
+	work: (Employee, usize) -> (int),
 };

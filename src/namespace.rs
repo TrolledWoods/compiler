@@ -1,6 +1,5 @@
 use crate::compilation_manager::{Id, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
-use crate::id::CIdMap;
 use crate::lexer::SourcePos;
 use crate::string_pile::TinyString;
 use chashmap::CHashMap;

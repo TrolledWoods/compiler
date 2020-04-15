@@ -1,16 +1,14 @@
-use crate::compilation_manager::{CompileManager, DefinedStruct, Id, Identifier};
+use crate::compilation_manager::{CompileManager, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
 use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, TokenKind};
-use crate::namespace::{NamespaceError, NamespaceId, NamespaceManager};
+use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
-use crate::types::{FunctionHeader, TypeDef, TypeKind};
-use crate::SRC_EXTENSION;
+use crate::types::{DefinedStruct, FunctionHeader, TypeDef, TypeKind};
 use std::fmt::{self, Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 
 pub struct Parser<'a> {
     pub manager: Arc<CompileManager>,
@@ -19,15 +17,11 @@ pub struct Parser<'a> {
 }
 
 impl Parser<'_> {
-    fn eat_token(&mut self, doing: ParsingActivity) -> Result<Option<Token>, ParseError> {
+    fn eat_token(&mut self) -> Result<Option<Token>, ParseError> {
         Ok(self.tokens.eat_token()?)
     }
 
-    fn peek_token(
-        &mut self,
-        doing: ParsingActivity,
-        n: usize,
-    ) -> Result<Option<Token>, ParseError> {
+    fn peek_token(&mut self, n: usize) -> Result<Option<Token>, ParseError> {
         Ok(self.tokens.peek_token(n)?)
     }
 }
@@ -226,14 +220,14 @@ pub fn parse_namespace(
     in_block: bool,
     id: NamespaceId,
 ) -> Result<(), ParseError> {
-    while let Some(token) = parser.peek_token(ParsingActivity::Namespace, 0)? {
+    while let Some(token) = parser.peek_token(0)? {
         if let Token {
             kind: TokenKind::ClosingBracket(BracketKind::Curly),
             ..
         } = token
         {
             if in_block {
-                parser.eat_token(ParsingActivity::Namespace)?;
+                parser.eat_token()?;
                 return Ok(());
             }
         }
@@ -259,7 +253,7 @@ fn parse_kind(
     kind: &TokenKind,
     doing: ParsingActivity,
 ) -> Result<Token, ParseError> {
-    let token = parser.eat_token(doing)?;
+    let token = parser.eat_token()?;
     match &token {
         Some(Token { kind: kind_, .. }) if kind_ == kind => Ok(token.unwrap()),
         _ => Err(UnexpectedTokenError {
@@ -277,7 +271,7 @@ fn parse_keyword(
     keyword: Keyword,
     doing: ParsingActivity,
 ) -> Result<Token, ParseError> {
-    let token = parser.eat_token(doing)?;
+    let token = parser.eat_token()?;
     match &token {
         Some(Token {
             kind: TokenKind::Keyword(k),
@@ -293,15 +287,11 @@ fn parse_keyword(
     }
 }
 
-fn try_parse_kind(
-    parser: &mut Parser<'_>,
-    kind: &TokenKind,
-    doing: ParsingActivity,
-) -> Result<Option<Token>, ParseError> {
-    let peeked_token = parser.peek_token(doing, 0)?;
+fn try_parse_kind(parser: &mut Parser<'_>, kind: &TokenKind) -> Result<Option<Token>, ParseError> {
+    let peeked_token = parser.peek_token(0)?;
     match &peeked_token {
         Some(Token { kind: kind_, .. }) if kind_ == kind => {
-            parser.eat_token(doing)?;
+            parser.eat_token()?;
             Ok(peeked_token)
         }
         _ => Ok(None),
@@ -313,15 +303,14 @@ fn try_parse_kind(
 pub fn try_parse_keyword(
     parser: &mut Parser<'_>,
     keyword: Keyword,
-    doing: ParsingActivity,
 ) -> Result<Option<Token>, ParseError> {
-    let peeked_token = parser.peek_token(doing, 0)?;
+    let peeked_token = parser.peek_token(0)?;
     match peeked_token {
         Some(Token {
             kind: TokenKind::Keyword(k),
             ..
         }) if k == keyword => {
-            parser.eat_token(doing)?;
+            parser.eat_token()?;
             Ok(peeked_token)
         }
         _ => Ok(None),
@@ -332,7 +321,7 @@ pub fn parse_identifier(
     parser: &mut Parser<'_>,
     doing: ParsingActivity,
 ) -> Result<Identifier, ParseError> {
-    let token = parser.eat_token(doing)?;
+    let token = parser.eat_token()?;
     match &token {
         Some(Token {
             kind: TokenKind::Identifier(name),
@@ -360,7 +349,7 @@ pub fn parse_constant_definition(
     let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
 
     // Expect a constant assignment
-    let assign_op = parse_kind(
+    parse_kind(
         parser,
         &TokenKind::Operator {
             kind: OpKind::Constant,
@@ -370,7 +359,7 @@ pub fn parse_constant_definition(
     )?;
 
     // Now figure out what kind of constant it is
-    let token = parser.peek_token(ParsingActivity::ConstantValue, 0)?;
+    let token = parser.peek_token(0)?;
     match token {
         Some(Token {
             kind: TokenKind::Keyword(Keyword::Struct),
@@ -409,14 +398,14 @@ fn parse_named_list<V>(
     mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
     activity: ParsingActivity,
 ) -> Result<(SourcePos, Vec<(Identifier, V)>), ParseError> {
-    let start = if let Some(start) = try_parse_kind(parser, &grammar.start, activity)? {
+    let start = if let Some(start) = try_parse_kind(parser, &grammar.start)? {
         start.start
     } else {
         return Err(UnexpectedTokenError {
             file: parser.file,
             activity,
             expected: vec![ExpectedValue::Kind(grammar.start)],
-            got: parser.peek_token(activity, 0)?.into(),
+            got: parser.peek_token(0)?.into(),
         }
         .into());
     };
@@ -424,7 +413,7 @@ fn parse_named_list<V>(
     // Read the members
     let mut members = Vec::new();
     loop {
-        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
             return Ok((
                 SourcePos {
                     file: parser.file,
@@ -447,7 +436,7 @@ fn parse_named_list<V>(
         let value = parse_value(parser)?;
         members.push((name, value));
 
-        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
             return Ok((
                 SourcePos {
                     file: parser.file,
@@ -514,7 +503,7 @@ fn try_parse_list<V>(
     parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
     activity: ParsingActivity,
 ) -> Result<Option<(SourcePos, Vec<V>)>, ParseError> {
-    if let Some(Token { kind, .. }) = parser.peek_token(activity, 0)? {
+    if let Some(Token { kind, .. }) = parser.peek_token(0)? {
         if kind == grammar.start {
             Ok(Some(parse_list(parser, grammar, parse_value, activity)?))
         } else {
@@ -531,21 +520,21 @@ fn parse_list<V>(
     mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
     activity: ParsingActivity,
 ) -> Result<(SourcePos, Vec<V>), ParseError> {
-    let start = if let Some(start) = try_parse_kind(parser, &grammar.start, activity)? {
+    let start = if let Some(start) = try_parse_kind(parser, &grammar.start)? {
         start.start
     } else {
         return Err(UnexpectedTokenError {
             file: parser.file,
             activity,
             expected: vec![ExpectedValue::Kind(grammar.start)],
-            got: parser.peek_token(activity, 0)?.into(),
+            got: parser.peek_token(0)?.into(),
         }
         .into());
     };
 
     let mut members = Vec::new();
     loop {
-        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
             return Ok((
                 SourcePos {
                     file: parser.file,
@@ -558,7 +547,7 @@ fn parse_list<V>(
 
         members.push(parse_value(parser)?);
 
-        if let Some(terminator) = try_parse_kind(parser, &grammar.end, activity)? {
+        if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
             return Ok((
                 SourcePos {
                     file: parser.file,
@@ -574,24 +563,23 @@ fn parse_list<V>(
 }
 
 fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
-    // Used for error messages
-    let head = parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
+    parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
 
     // Parse the named list of types
-    let (_, members) = parse_named_list(
+    let (pos, members) = parse_named_list(
         parser,
         ListGrammar::curly(),
         |parser| parse_type(parser),
         ParsingActivity::StructMember,
     )?;
 
-    Ok(DefinedStruct { head, members })
+    Ok(DefinedStruct { pos, members })
 }
 
 fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
-    match parser.peek_token(ParsingActivity::Type, 0)? {
+    match parser.peek_token(0)? {
         Some(Token {
-            kind: TokenKind::Identifier(data),
+            kind: TokenKind::Identifier(_),
             ..
         }) => parse_offloaded_type(parser),
         Some(Token {
@@ -606,7 +594,6 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
                     kind: OpKind::ReturnArrow,
                     is_assignment: false,
                 },
-                ParsingActivity::FunctionPtr,
             )? {
                 // This is a function pointer!
                 let (return_pos, return_tuple) = parse_tuple_type(parser)?;

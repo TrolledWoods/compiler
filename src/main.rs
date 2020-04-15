@@ -42,11 +42,7 @@ fn main() {
     // Parsing step
     let root = manager.namespace_manager.insert_root();
     let mut errors = Vec::new();
-    if let Err(err) = parser::parse_file(
-        &src_file_path,
-        manager.clone(),
-        namespace::NamespaceId::new(1),
-    ) {
+    if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), root) {
         errors.push(err);
     }
 

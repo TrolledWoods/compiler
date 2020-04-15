@@ -1,6 +1,5 @@
 use crate::compilation_manager::Identifier;
 use crate::lexer::SourcePos;
-use crate::string_pile::TinyString;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug)]
@@ -84,4 +83,36 @@ impl Display for FunctionHeader {
 
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum TypeId {
+    Struct(StructId),
+}
+
+create_id!(StructId);
+
+#[derive(Debug)]
+pub struct DefinedStruct {
+    pub pos: SourcePos,
+    pub members: Vec<(Identifier, TypeDef)>,
+}
+
+impl Display for DefinedStruct {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "struct (")?;
+        for (i, (ident, type_def)) in self.members.iter().enumerate() {
+            if i != 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}: {}", ident.data, type_def)?;
+        }
+        write!(f, ")")?;
+
+        Ok(())
+    }
+}
+
+pub struct ResolvedStruct {
+    pub members: Vec<(Identifier, TypeId)>,
 }

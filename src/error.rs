@@ -1,6 +1,5 @@
 use crate::debug_printing::{pretty_print_feedback, FeedbackLog, LogPosition};
 use crate::lexer::SourcePos;
-use ansi_term::Color;
 
 pub trait CompileError {
     fn get_printing_data(self) -> ErrorPrintingData;
@@ -35,7 +34,7 @@ impl ErrorPrintingData {
     pub fn print(&self) {
         println!("ERROR: {}", self.error);
 
-        let mut main_problems = self.main_problems.iter();
+        let main_problems = self.main_problems.iter();
         let mut logs = Vec::new();
 
         for problem in main_problems {

@@ -3,7 +3,6 @@ use crate::keyword::Keyword;
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
 use std::collections::VecDeque;
-use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Clone, Debug)]

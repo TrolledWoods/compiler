@@ -1,5 +1,5 @@
 Vec2f :: struct {
-  x: f32,
+  x: (String, f32),
   y: f32,
 };
 

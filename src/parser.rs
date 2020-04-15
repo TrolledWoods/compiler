@@ -39,6 +39,7 @@ pub enum ParsingActivity {
     StructMember,
     Type,
     OffloadedType,
+    Tuple,
 
     Constant,
     ConstantValue,
@@ -55,6 +56,7 @@ impl Display for ParsingActivity {
             StructMember => write!(f, "struct member"),
             Type => write!(f, "type"),
             OffloadedType => write!(f, "offloaded type"),
+            Tuple => write!(f, "tuple"),
             Constant => write!(f, "constant"),
             ConstantValue => write!(f, "constant value"),
             Namespace => write!(f, "namespace"),
@@ -348,7 +350,7 @@ pub fn parse_constant_definition(
         }) => {
             let s = parse_struct(parser)?;
 
-            println!("{:?}", &s);
+            println!("{}", &s);
             parser.manager.insert_struct(namespace_id, identifier, s)?;
         }
         _ => {
@@ -424,14 +426,19 @@ fn parse_named_list<V>(
 
 fn parse_list<V>(
     parser: &mut Parser,
+    start: TextPos,
     mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
     terminator: TokenKind,
     activity: ParsingActivity,
-) -> Result<Vec<V>, ParseError> {
+) -> Result<(SourcePos, Vec<V>), ParseError> {
     let mut members = Vec::new();
     loop {
         if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
-            break;
+            return Ok((SourcePos {
+                file: parser.file,
+                start,
+                end: terminator.end,
+            }, members));
         }
 
         // Parse the value
@@ -440,13 +447,16 @@ fn parse_list<V>(
 
         // Read a separator or the terminator
         if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
-            break;
+            return Ok((SourcePos {
+                file: parser.file,
+                start,
+                end: terminator.end,
+            }, members));
         }else {
             parse_kind(parser, TokenKind::Separator, activity)?;
         }
     }
 
-    Ok(members)
 }
 
 fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
@@ -475,7 +485,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
         Some(Token { kind: TokenKind::Identifier(data), .. }) => 
                 parse_offloaded_type(parser),
         Some(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), .. }) => 
-                unimplemented!(), //parse_tuple(parser),
+                parse_tuple_type(parser),
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Type,
@@ -488,23 +498,41 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     }
 }
 
+fn parse_tuple_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+    let paren = parse_kind(parser, TokenKind::OpeningBracket(BracketKind::Paren), ParsingActivity::Tuple)?;
+
+    let (pos, members) = parse_list(parser,
+               paren.start,
+               parse_type,
+               TokenKind::ClosingBracket(BracketKind::Paren),
+               ParsingActivity::Tuple)?;
+
+    Ok(TypeDef {
+        pos,
+        kind: TypeKind::Tuple(members),
+    })
+}
+
 fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
 
-    let generics = if let Some(_) = try_parse_kind(parser, &TokenKind::Operator {
-        kind: OpKind::Less,
-        is_assignment: false,
+    let (pos, generics) = if let Some(_) = try_parse_kind(
+        parser, 
+        &TokenKind::Operator {
+            kind: OpKind::Less,
+            is_assignment: false,
     }, ParsingActivity::OffloadedType)? {
         parse_list(parser,
+                   name.pos.start,
                    parse_type,
                    TokenKind::Operator { kind: OpKind::Greater, is_assignment: false, },
                    ParsingActivity::OffloadedType)?
     }else {
-        vec![]
+        (name.pos.clone(), vec![])
     };
 
     Ok(TypeDef { 
-        pos: name.pos.clone(), 
+        pos, 
         kind: TypeKind::Offload {
             name,
             generics,

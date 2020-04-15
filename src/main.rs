@@ -19,8 +19,7 @@ mod parser;
 mod string_pile;
 mod error;
 mod debug_printing;
-
-// mod types;
+mod types;
 
 pub const SRC_EXTENSION: &str = "txt";
 

@@ -2,6 +2,8 @@ use crate::lexer::{ Token, SourcePos };
 use crate::namespace::{NamespaceId, AllowAmbiguity, NamespaceError, NamespaceManager};
 use crate::string_pile::TinyString;
 use crate::id::CIdMap;
+// TODO: Move the type stuff into types.rs
+use crate::types::TypeDef;
 use chashmap::CHashMap;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
@@ -66,7 +68,7 @@ create_id!(StructId);
 #[derive(Debug)]
 pub struct DefinedStruct {
     pub head: Token,
-    pub members: Vec<(Identifier, Identifier)>,
+    pub members: Vec<(Identifier, TypeDef)>,
 }
 
 pub struct ResolvedStruct {

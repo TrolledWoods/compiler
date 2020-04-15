@@ -6,6 +6,7 @@ use crate::operator::OpKind;
 use crate::string_pile::TinyString;
 use crate::SRC_EXTENSION;
 use crate::error::{CompileError, ErrorPrintingData};
+use crate::types::{TypeDef, TypeKind, FunctionHeader};
 use std::fmt::{self, Formatter, Display};
 use std::thread::{self, JoinHandle};
 use std::path::{Path, PathBuf};
@@ -36,6 +37,8 @@ pub enum ParsingActivity {
     Debug,
     Struct,
     StructMember,
+    Type,
+    OffloadedType,
 
     Constant,
     ConstantValue,
@@ -50,6 +53,8 @@ impl Display for ParsingActivity {
             Debug => write!(f, "COMPILER DEBBUGING THING"),
             Struct => write!(f, "struct"),
             StructMember => write!(f, "struct member"),
+            Type => write!(f, "type"),
+            OffloadedType => write!(f, "offloaded type"),
             Constant => write!(f, "constant"),
             ConstantValue => write!(f, "constant value"),
             Namespace => write!(f, "namespace"),
@@ -409,11 +414,36 @@ fn parse_named_list<V>(
         // Read a separator or the terminator
         if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
             break;
+        }else {
+            parse_kind(parser, TokenKind::Separator, activity)?;
+        }
+    }
+
+    Ok(members)
+}
+
+fn parse_list<V>(
+    parser: &mut Parser,
+    mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
+    terminator: TokenKind,
+    activity: ParsingActivity,
+) -> Result<Vec<V>, ParseError> {
+    let mut members = Vec::new();
+    loop {
+        if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
+            break;
         }
 
-        // If we didn't recieve the terminator, we HAVE
-        // to get a separator
-        parse_kind(parser, TokenKind::Separator, activity)?;
+        // Parse the value
+        let value = parse_value(parser)?;
+        members.push(value);
+
+        // Read a separator or the terminator
+        if let Some(terminator) = try_parse_kind(parser, &terminator, activity)? {
+            break;
+        }else {
+            parse_kind(parser, TokenKind::Separator, activity)?;
+        }
     }
 
     Ok(members)
@@ -432,10 +462,52 @@ fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
     // Parse the named list of types
     let members = parse_named_list(
         parser,
-        |parser| parse_identifier(parser, ParsingActivity::StructMember),
+        |parser| parse_type(parser),
         TokenKind::ClosingBracket(BracketKind::Curly),
         ParsingActivity::StructMember,
     )?;
 
     Ok(DefinedStruct { head, members })
+}
+
+fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+    match parser.peek_token(ParsingActivity::Type, 0)? {
+        Some(Token { kind: TokenKind::Identifier(data), .. }) => 
+                parse_offloaded_type(parser),
+        Some(Token { kind: TokenKind::OpeningBracket(BracketKind::Paren), .. }) => 
+                unimplemented!(), //parse_tuple(parser),
+        c => Err(UnexpectedTokenError {
+            file: parser.file,
+            activity: ParsingActivity::Type,
+            expected: vec![
+                ExpectedValue::Identifier, 
+                ExpectedValue::OpeningBracket(BracketKind::Paren)
+            ],
+            got: c.into(),
+        }.into()),
+    }
+}
+
+fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+    let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
+
+    let generics = if let Some(_) = try_parse_kind(parser, &TokenKind::Operator {
+        kind: OpKind::Less,
+        is_assignment: false,
+    }, ParsingActivity::OffloadedType)? {
+        parse_list(parser,
+                   parse_type,
+                   TokenKind::Operator { kind: OpKind::Greater, is_assignment: false, },
+                   ParsingActivity::OffloadedType)?
+    }else {
+        vec![]
+    };
+
+    Ok(TypeDef { 
+        pos: name.pos.clone(), 
+        kind: TypeKind::Offload {
+            name,
+            generics,
+        }
+    })
 }

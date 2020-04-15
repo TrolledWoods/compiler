@@ -1,10 +1,10 @@
 Vec2f :: struct {
-	x: f32,
-	y: f32,
+  x: f32,
+  y: f32,
 };
 
 Hi :: struct {
-	y: f32,,
+  y: Vec<f32>,
 };
 
 

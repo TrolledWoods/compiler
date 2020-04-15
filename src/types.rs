@@ -1,24 +1,25 @@
 use crate::string_pile::TinyString;
+use crate::compilation_manager::Identifier;
+use crate::lexer::SourcePos;
 
-pub enum Type {
-    Primitive(PrimitiveKind),
-    Function(FunctionHeader),
+#[derive(Debug)]
+pub struct TypeDef {
+    pub pos: SourcePos,
+    pub kind: TypeKind,
 }
 
+#[derive(Debug)]
+pub enum TypeKind {
+    Offload{
+        name: Identifier, 
+        generics: Vec<TypeDef>,
+    },
+    Tuple(Vec<TypeDef>),
+    FunctionPtr(FunctionHeader),
+}
+
+#[derive(Debug)]
 pub struct FunctionHeader {
-    pub inputs: Vec<Type>,
-    pub returns: Option<Box<Type>>,
-}
-
-pub enum PrimitiveKind {
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
-    F32,
-    F64,
+    pub args: Vec<TypeDef>,
+    pub returns: Vec<TypeDef>,
 }

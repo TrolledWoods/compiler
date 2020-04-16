@@ -19,11 +19,14 @@ fn read_pile<'a>() -> RwLockReadGuard<'a, Vec<String>> {
 pub struct TinyString(usize);
 
 impl TinyString {
-    // pub fn read<'a>(&'a self) -> (&'a str, RwLockReadGuard<'a, Vec<String>>) {
-    //     let guard = PILE.read().unwrap();
+    pub fn read<'a>(&'a self) -> TinyStringReadGuard<'a> {
+        let guard = PILE.read().unwrap();
 
-    //     (&guard[self.0], guard)
-    // }
+        TinyStringReadGuard {
+            guard,
+            index: self.0,
+        }
+    }
 }
 
 impl std::cmp::PartialEq<&str> for TinyString {
@@ -70,14 +73,14 @@ impl std::fmt::Display for TinyString {
 
 pub struct TinyStringReadGuard<'a> {
     guard: RwLockReadGuard<'a, Vec<String>>,
-    id: usize,
+    index: usize,
 }
 
 impl Deref for TinyStringReadGuard<'_> {
     type Target = str;
 
     fn deref<'a>(&'a self) -> &'a Self::Target {
-        &self.guard[self.id]
+        &self.guard[self.index]
     }
 }
 

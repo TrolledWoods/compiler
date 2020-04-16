@@ -46,6 +46,7 @@ impl CompileError for NamespaceError {
     }
 }
 
+#[derive(Debug)]
 pub enum NamespaceAccessError {
     DoesNotExist,
     Ambiguous(Vec<(Identifier, CompilationUnitId)>),

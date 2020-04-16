@@ -5,7 +5,7 @@ use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, To
 use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
-use crate::types::{FunctionHeader, TypeDef, TypeKind};
+use crate::types::{FunctionHeader, PrimitiveKind, TypeDef, TypeDefKind};
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
@@ -584,7 +584,7 @@ fn parse_struct(
 
     Ok(TypeDef {
         pos,
-        kind: TypeKind::Struct(members),
+        kind: TypeDefKind::Struct(members),
     })
 }
 
@@ -620,7 +620,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
                         start: pos.start,
                         end: return_pos.end,
                     },
-                    kind: TypeKind::FunctionPtr(FunctionHeader {
+                    kind: TypeDefKind::FunctionPtr(FunctionHeader {
                         args: tuple,
                         returns: return_tuple,
                     }),
@@ -629,7 +629,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
                 // This is just a tuple
                 Ok(TypeDef {
                     pos,
-                    kind: TypeKind::Tuple(tuple),
+                    kind: TypeDefKind::Tuple(tuple),
                 })
             }
         }
@@ -663,6 +663,31 @@ fn parse_offloaded_type(
 ) -> Result<TypeDef, ParseError> {
     let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
 
+    // See if it's a primitive
+    {
+        let data = name.data.read();
+        let primitive = match &data as &str {
+            "f32" => Some(PrimitiveKind::F32),
+            "f64" => Some(PrimitiveKind::F64),
+            "u8" => Some(PrimitiveKind::U8),
+            "u16" => Some(PrimitiveKind::U16),
+            "u32" => Some(PrimitiveKind::U32),
+            "u64" => Some(PrimitiveKind::U64),
+            "i8" => Some(PrimitiveKind::I8),
+            "i16" => Some(PrimitiveKind::I16),
+            "i32" => Some(PrimitiveKind::I32),
+            "i64" => Some(PrimitiveKind::I64),
+            _ => None,
+        };
+
+        if let Some(primitive) = primitive {
+            return Ok(TypeDef {
+                pos: name.pos,
+                kind: TypeDefKind::Primitive(primitive),
+            });
+        }
+    }
+
     let (pos, generics) = match try_parse_list(
         parser,
         ListGrammar::angle(),
@@ -694,9 +719,6 @@ fn parse_offloaded_type(
 
     Ok(TypeDef {
         pos,
-        kind: TypeKind::Offload {
-            reference: name.data,
-            generics,
-        },
+        kind: TypeDefKind::Offload(name.data),
     })
 }

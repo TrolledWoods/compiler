@@ -26,6 +26,10 @@ impl ErrorPrintingData {
         self
     }
 
+    pub fn push_problem(&mut self, pos: SourcePos, message: String) {
+        self.main_problems.push(Message { pos, message });
+    }
+
     pub fn info(mut self, pos: SourcePos, message: String) -> ErrorPrintingData {
         self.added_info.push(Message { pos, message });
         self

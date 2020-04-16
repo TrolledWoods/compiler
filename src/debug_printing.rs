@@ -160,7 +160,7 @@ fn print_message(
         match (start, end) {
             (Some(start), Some(end)) => {
                 print!("{:>1$}", "", start);
-                (start..=end).for_each(|_c| print!("{}", arrow));
+                (start..end).for_each(|_c| print!("{}", arrow));
             }
             (None, Some(end)) => {
                 print!("{:->1$}", "", end);
@@ -180,7 +180,12 @@ fn print_message(
     // Yucky printing code for messages
     match pos {
         LogPosition::Above => {
-            println!("{:>1$}   {2}", "", n_digits, message);
+            println!(
+                "{:>1$}   {2}",
+                "",
+                n_digits + start.unwrap_or(end.unwrap_or(0)),
+                message
+            );
 
             print!("{:>1$}   ", "", n_digits);
             print_arrow('v', message, start, end);
@@ -191,7 +196,12 @@ fn print_message(
             print_arrow('^', message, start, end);
             println!("");
 
-            println!("{:>1$}   {2}", "", n_digits, message);
+            println!(
+                "{:>1$}   {2}",
+                "",
+                n_digits + start.unwrap_or(end.unwrap_or(0)),
+                message
+            );
         }
     };
 }

@@ -49,6 +49,7 @@ fn main() {
 
     // Parsing step
     let root = manager.namespace_manager.insert_root();
+
     let mut errors = Vec::new();
     if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), root) {
         errors.push(err);
@@ -79,5 +80,17 @@ fn main() {
         }
     }
 
-    println!("{:?}", compilation_errors);
+    if compilation_errors.len() > 0 {
+        use crate::error::CompileError;
+
+        println!("There were errors while compiling!\n");
+
+        for error in compilation_errors {
+            error.get_printing_data().print();
+        }
+
+        return;
+    }
+
+    println!("Built succesfully! :D");
 }

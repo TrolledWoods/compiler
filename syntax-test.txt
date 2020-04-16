@@ -1,15 +1,4 @@
-Food :: struct {};
-
-Other :: ();
-
-Third :: (Other, Food, Yes);
-
-
-
-
-
-
-
-
-
-Yes :: (Food) -> ();
+Vec2f :: struct {
+    x: f32,
+	y: f32,
+};

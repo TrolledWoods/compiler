@@ -1,18 +1,3 @@
-// * :: other; // Here we import SocietyMember but
-            // it's like implicit, so we can override it even though it's ambiguous
-
-// * :: other_thing; // Maybe ambiguous stuff as well with SocietyMember
-                  // here, society member cannot be accessed, because it's ambiguous with
-				  // another thing of the same "priority"
-
 SocietyMember :: struct {
-    salary: (h),
-	debt: i64,
-	friends: Array
+x: (i<(i<(i<(i<(i<(i<(i<f32,>)>,)>,)>,)>,)>,)>,),
 };
-
-// Here it's no longer ambiguous, we got one defined explicitly
-
-SocietyMember :: struct {  };
-// Here it's ambiguous again, and this gives an error,
-// because ambiguity with explicit imports isn't allowed

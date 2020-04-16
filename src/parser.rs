@@ -349,6 +349,7 @@ pub fn parse_constant_definition(
     let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
 
     // Expect a constant assignment
+    // TODO: Parse an optional type parameter here
     parse_kind(
         parser,
         &TokenKind::Operator {

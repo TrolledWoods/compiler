@@ -3,6 +3,7 @@ use crate::lexer::SourcePos;
 use crate::namespace::{AllowAmbiguity, NamespaceError, NamespaceId, NamespaceManager};
 use crate::string_pile::TinyString;
 use crate::types::{DefinedStruct, ResolvedStruct, StructId, TypeId};
+use std::sync::atomic::AtomicU32;
 
 pub struct CompileManager {
     pub namespace_manager: NamespaceManager,
@@ -44,8 +45,10 @@ pub enum Id {
     Type(TypeId),
 }
 
+#[derive(Debug)]
 pub enum StructCompilationUnit {
     Defined(DefinedStruct, Vec<Id>),
+    DependencyWaiting(DefinedStruct, AtomicU32, Vec<Id>),
     Resolved(ResolvedStruct),
 }
 

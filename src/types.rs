@@ -1,6 +1,6 @@
 use crate::compilation_manager::Identifier;
 use crate::lexer::SourcePos;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 
 #[derive(Debug)]
 pub struct TypeDef {
@@ -14,7 +14,6 @@ impl Display for TypeDef {
     }
 }
 
-#[derive(Debug)]
 pub enum TypeKind {
     Offload {
         name: Identifier,
@@ -22,6 +21,12 @@ pub enum TypeKind {
     },
     Tuple(Vec<TypeDef>),
     FunctionPtr(FunctionHeader),
+}
+
+impl Debug for TypeKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl Display for TypeKind {
@@ -113,6 +118,7 @@ impl Display for DefinedStruct {
     }
 }
 
+#[derive(Debug)]
 pub struct ResolvedStruct {
     pub members: Vec<(Identifier, TypeId)>,
 }

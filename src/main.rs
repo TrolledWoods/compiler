@@ -1,3 +1,10 @@
+// We are doing this to remove clutter.
+// May be nice to remove this tag sometimes
+// when cleaning up stuff, but right now
+// the compiler is so incomplete that it just
+// makes me scroll up to find the errors/warnings I want
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,10 +65,13 @@ fn main() {
         return;
     }
 
-    let _owned_manager = match Arc::try_unwrap(manager) {
+    let manager = match Arc::try_unwrap(manager) {
         Ok(value) => value,
         Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
     };
 
-    // Now we have parsed everything.
+    // Print all the structs for debug info
+    for (_, s) in manager.structs {
+        println!("{:?}", s);
+    }
 }

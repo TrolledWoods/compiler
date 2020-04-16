@@ -72,3 +72,12 @@ impl<I: Id, D> CIdMap<I, D> {
         self.data.get_mut(&id)
     }
 }
+
+impl<I: Id, D> IntoIterator for CIdMap<I, D> {
+    type Item = (I, D);
+    type IntoIter = <CHashMap<I, D> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}

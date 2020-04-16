@@ -1,4 +1,4 @@
-use crate::compilation_manager::{Id, Identifier};
+use crate::compilation_manager::{CompilationUnitId, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::lexer::SourcePos;
 use crate::string_pile::TinyString;
@@ -7,7 +7,7 @@ use chashmap::CHashMap;
 #[derive(Clone, Debug, PartialEq)]
 pub enum NamespaceError {
     DuplicateName {
-        inserting: (Identifier, Id),
+        inserting: (Identifier, CompilationUnitId),
         old_member: NamespaceElement,
     },
 }
@@ -48,13 +48,13 @@ impl CompileError for NamespaceError {
 
 pub enum NamespaceAccessError {
     DoesNotExist,
-    Ambiguous(Vec<(Identifier, Id)>),
+    Ambiguous(Vec<(Identifier, CompilationUnitId)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum NamespaceElement {
-    Singular(Identifier, Id, AllowAmbiguity),
-    Ambiguous(Vec<(Identifier, Id)>),
+    Singular(Identifier, CompilationUnitId, AllowAmbiguity),
+    Ambiguous(Vec<(Identifier, CompilationUnitId)>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,7 +80,7 @@ impl NamespaceManager {
         &self,
         _parent: NamespaceId,
         name: Identifier,
-        member_id: Id,
+        member_id: CompilationUnitId,
         is_ambiguity_allowed: AllowAmbiguity,
     ) -> Result<(), NamespaceError> {
         match self.name_map.get_mut(&name.data) {
@@ -139,7 +139,7 @@ impl NamespaceManager {
         &self,
         _parent: NamespaceId,
         name: TinyString,
-    ) -> Result<(SourcePos, Id), NamespaceAccessError> {
+    ) -> Result<(SourcePos, CompilationUnitId), NamespaceAccessError> {
         match self.name_map.get(&name) {
             Some(element) => match &element as &NamespaceElement {
                 NamespaceElement::Singular(name, value, _) => Ok((name.pos.clone(), value.clone())),

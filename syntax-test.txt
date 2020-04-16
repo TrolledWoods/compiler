@@ -1,3 +1,15 @@
-SocietyMember :: struct {
-x: (i<(i<(i<(i<(i<(i<(i<f32,>)>,)>,)>,)>,)>,)>,),
-};
+Food :: struct {};
+
+Other :: ();
+
+Third :: (Other, Food, Yes);
+
+
+
+
+
+
+
+
+
+Yes :: (Food) -> ();

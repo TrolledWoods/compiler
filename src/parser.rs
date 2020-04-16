@@ -1,11 +1,11 @@
-use crate::compilation_manager::{CompileManager, Identifier};
+use crate::compilation_manager::{CompileManager, Dependencies, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
 use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, TokenKind};
 use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
-use crate::types::{DefinedStruct, FunctionHeader, TypeDef, TypeKind};
+use crate::types::{FunctionHeader, TypeDef, TypeKind};
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
@@ -362,21 +362,22 @@ pub fn parse_constant_definition(
     // Now figure out what kind of constant it is
     let token = parser.peek_token(0)?;
     match token {
-        Some(Token {
-            kind: TokenKind::Keyword(Keyword::Struct),
-            ..
-        }) => {
-            let s = parse_struct(parser)?;
-            parser.manager.insert_struct(namespace_id, identifier, s)?;
-        }
-        _ => {
-            Err(UnexpectedTokenError {
-                file: parser.file,
-                activity: ParsingActivity::ConstantValue,
-                expected: vec![ExpectedValue::ConstantDefinitionValue],
-                got: token.into(),
-            })?;
-        }
+        // Assume for now that it's a type.
+        // That won't be the case forever, though
+        c => {
+            let mut dependencies = Vec::new();
+            let type_def = parse_type(parser, &mut dependencies)?;
+            parser
+                .manager
+                .insert_named_type(namespace_id, identifier, type_def, dependencies)?;
+        } // _ => {
+          //     Err(UnexpectedTokenError {
+          //         file: parser.file,
+          //         activity: ParsingActivity::ConstantValue,
+          //         expected: vec![ExpectedValue::ConstantDefinitionValue],
+          //         got: token.into(),
+          //     })?;
+          // }
     }
 
     // Even const expressions have to have semicolons.
@@ -563,31 +564,45 @@ fn parse_list<V>(
     }
 }
 
-fn parse_struct(parser: &mut Parser) -> Result<DefinedStruct, ParseError> {
+fn parse_struct(
+    parser: &mut Parser,
+    dependencies: &mut Dependencies,
+) -> Result<TypeDef, ParseError> {
     parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
 
-    // Parse the named list of types
     let (pos, members) = parse_named_list(
         parser,
         ListGrammar::curly(),
-        |parser| parse_type(parser),
+        |parser| parse_type(parser, dependencies),
         ParsingActivity::StructMember,
     )?;
 
-    Ok(DefinedStruct { pos, members })
+    let members: Vec<(TinyString, TypeDef)> = members
+        .into_iter()
+        .map(|(name, v)| (name.data, v))
+        .collect();
+
+    Ok(TypeDef {
+        pos,
+        kind: TypeKind::Struct(members),
+    })
 }
 
-fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<TypeDef, ParseError> {
     match parser.peek_token(0)? {
+        Some(Token {
+            kind: TokenKind::Keyword(Keyword::Struct),
+            ..
+        }) => parse_struct(parser, dependencies),
         Some(Token {
             kind: TokenKind::Identifier(_),
             ..
-        }) => parse_offloaded_type(parser),
+        }) => parse_offloaded_type(parser, dependencies),
         Some(Token {
             kind: TokenKind::OpeningBracket(BracketKind::Paren),
             ..
         }) => {
-            let (pos, tuple) = parse_tuple_type(parser)?;
+            let (pos, tuple) = parse_tuple_type(parser, dependencies)?;
 
             if let Some(_) = try_parse_kind(
                 parser,
@@ -597,7 +612,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
                 },
             )? {
                 // This is a function pointer!
-                let (return_pos, return_tuple) = parse_tuple_type(parser)?;
+                let (return_pos, return_tuple) = parse_tuple_type(parser, dependencies)?;
 
                 Ok(TypeDef {
                     pos: SourcePos {
@@ -628,24 +643,30 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     }
 }
 
-fn parse_tuple_type(parser: &mut Parser) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
+fn parse_tuple_type(
+    parser: &mut Parser,
+    dependencies: &mut Dependencies,
+) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
     let (pos, members) = parse_list(
         parser,
         ListGrammar::parenthesis(),
-        parse_type,
+        |value| parse_type(value, dependencies),
         ParsingActivity::Tuple,
     )?;
 
     Ok((pos, members))
 }
 
-fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+fn parse_offloaded_type(
+    parser: &mut Parser,
+    dependencies: &mut Dependencies,
+) -> Result<TypeDef, ParseError> {
     let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
 
     let (pos, generics) = match try_parse_list(
         parser,
         ListGrammar::angle(),
-        parse_type,
+        |value| parse_type(value, dependencies),
         ParsingActivity::OffloadedType,
     )? {
         Some((generics_pos, list)) => (
@@ -659,8 +680,23 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
         None => (name.pos.clone(), vec![]),
     };
 
+    let mut added_dep = false;
+    for (dep, positions) in dependencies.iter_mut() {
+        if *dep == name.data {
+            positions.push(name.pos.clone());
+            added_dep = true;
+            break;
+        }
+    }
+    if !added_dep {
+        dependencies.push((name.data, vec![name.pos.clone()]));
+    }
+
     Ok(TypeDef {
         pos,
-        kind: TypeKind::Offload { name, generics },
+        kind: TypeKind::Offload {
+            reference: name.data,
+            generics,
+        },
     })
 }

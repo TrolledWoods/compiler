@@ -68,7 +68,7 @@ impl<I: Id, D> CIdMap<I, D> {
         self.data.get(&id)
     }
 
-    pub fn get_mut<'a>(&'a mut self, id: I) -> Option<WriteGuard<'a, I, D>> {
+    pub fn get_mut<'a>(&'a self, id: I) -> Option<WriteGuard<'a, I, D>> {
         self.data.get_mut(&id)
     }
 }

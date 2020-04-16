@@ -21,6 +21,7 @@ mod debug_printing;
 mod error;
 mod keyword;
 mod lexer;
+mod misc;
 mod namespace;
 mod operator;
 mod parser;
@@ -70,8 +71,13 @@ fn main() {
         Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
     };
 
-    // Print all the structs for debug info
-    for (_, s) in manager.structs {
-        println!("{:?}", s);
+    let mut compilation_errors = Vec::new();
+    while let Some(id) = manager.get_ready_compilation_unit() {
+        match manager.advance_compilation_unit(id) {
+            Ok(()) => (),
+            Err(error) => compilation_errors.push(error),
+        }
     }
+
+    println!("{:?}", compilation_errors);
 }

@@ -4,6 +4,7 @@
 // the compiler is so incomplete that it just
 // makes me scroll up to find the errors/warnings I want
 #![allow(dead_code)]
+#![allow(unused_imports)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

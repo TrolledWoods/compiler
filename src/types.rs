@@ -1,6 +1,9 @@
-use crate::compilation_manager::{Identifier, NamedTypeId, ResolvedTypeId};
+use crate::compilation_manager::{
+    CompilationUnit, CompilationUnitId, CompileManager, CompileManagerError, Identifier,
+};
 use crate::lexer::SourcePos;
 use crate::misc::collect_to_vec_if_ok;
+use crate::namespace::NamespaceId;
 use crate::string_pile::TinyString;
 use std::fmt::{self, Debug, Display, Formatter};
 
@@ -134,5 +137,175 @@ impl<T: Display> Display for FunctionHeader<T> {
         write!(f, ")")?;
 
         Ok(())
+    }
+}
+
+create_id!(ResolvedTypeId);
+create_id!(NamedTypeId);
+
+pub enum TypeId {
+    Named(NamedTypeId),
+    Resolved(ResolvedTypeId),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct ResolvedTypeDef {
+    pub size: usize,
+    pub align: usize,
+    pub kind: ResolvedTypeKind,
+}
+
+/// Inserts a resolved and "finished" type
+/// into a compilation manager and returns an
+/// id to it. If there already exists an identical
+/// type in the manager though, the id of that
+/// will be returned instead
+pub fn insert_resolved_type(
+    manager: &CompileManager,
+    definition: ResolvedTypeDef,
+) -> ResolvedTypeId {
+    // Look for an existing version
+    let mut lock = manager.unnamed_types.lock().unwrap();
+    if let Some(id) = lock.get(&definition) {
+        return *id;
+    }
+
+    println!("Inserting new type");
+    println!("    def: {:?}", &definition);
+    let key = definition.clone();
+    let id = manager.resolved_types.insert(definition);
+    lock.insert(key, id);
+
+    println!("    id: {:?}", id);
+
+    id
+}
+
+/// Resolves a type(figures out size and align of it).
+/// All dependencies of the type_def have to be defined
+/// and resolved.
+pub fn resolve_type_def(
+    manager: &CompileManager,
+    namespace_id: NamespaceId,
+    type_def: &TypeDef,
+) -> Result<(usize, usize, ResolvedTypeId), CompileManagerError> {
+    match &type_def.kind {
+        TypeDefKind::Offload(reference) => {
+            let (member_pos, id) = manager
+                .namespace_manager
+                .get_member(namespace_id, *reference)
+                .unwrap();
+
+            let named_type_id = match id {
+                CompilationUnitId::NamedType(id) => id,
+                _ => {
+                    return Err(CompileManagerError::ExpectedType {
+                        pos: type_def.pos.clone(),
+                        reference_pos: member_pos,
+                    })
+                }
+            };
+
+            let referencing_id = {
+                let named_type = manager.named_types.get(named_type_id).unwrap();
+                match &named_type as &CompilationUnit<_, _> {
+                    CompilationUnit::Resolved((_, id)) => *id,
+                    _ => unreachable!("Tried accessing a non compiled NamedType"),
+                }
+            };
+
+            let referencing = manager.resolved_types.get(referencing_id).unwrap();
+
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size: referencing.size,
+                    align: referencing.align,
+                    kind: ResolvedTypeKind::Offload(named_type_id),
+                },
+            );
+
+            Ok((referencing.size, referencing.align, id))
+        }
+        TypeDefKind::Tuple(members) => {
+            let mut resolved_members = Vec::with_capacity(members.len());
+            let mut size = 0;
+            let mut align = 0;
+            for member in members {
+                let (member_size, member_align, new_member) =
+                    resolve_type_def(manager, namespace_id, member)?;
+                // :^> best align system ever!!!
+                if member_align != 0 {
+                    if member_align >= align {
+                        align = member_align;
+                    }
+
+                    while size % member_align != 0 {
+                        size += 1;
+                    }
+                }
+                resolved_members.push((size, new_member));
+                size += member_size;
+            }
+
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size,
+                    align,
+                    kind: ResolvedTypeKind::Tuple(resolved_members),
+                },
+            );
+
+            Ok((size, align, id))
+        }
+        TypeDefKind::Struct(members) => {
+            let mut resolved_members = Vec::with_capacity(members.len());
+            let mut size = 0;
+            let mut align = 0;
+
+            for (name, member) in members {
+                let (member_size, member_align, new_member) =
+                    resolve_type_def(manager, namespace_id, member)?;
+                // :^> best align system ever!!!
+                if member_align != 0 {
+                    if member_align >= align {
+                        align = member_align;
+                    }
+
+                    while size % member_align != 0 {
+                        size += 1;
+                    }
+                }
+                resolved_members.push((size, *name, new_member));
+                size += member_size;
+            }
+
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size,
+                    align,
+                    kind: ResolvedTypeKind::Struct(resolved_members),
+                },
+            );
+
+            Ok((size, align, id))
+        }
+        TypeDefKind::Primitive(primitive_kind) => {
+            let (size, align) = primitive_kind.get_size_and_align();
+
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size,
+                    align,
+                    kind: ResolvedTypeKind::Primitive(*primitive_kind),
+                },
+            );
+
+            Ok((size, align, id))
+        }
+        _ => unimplemented!(),
     }
 }

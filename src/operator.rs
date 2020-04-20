@@ -5,6 +5,7 @@ pub enum OpKind {
     Declaration,
     Constant,
     ReturnArrow,
+    Dereference,
     Access,
     Add,
     Sub,

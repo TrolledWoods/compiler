@@ -3,5 +3,11 @@ Vec2f :: struct {
 	y: f32,
 };
 
-YES :: (Vec2f, Vec2f);
-Hello :: Vec2f;
+Person :: struct {
+    pos: Vec2f,
+};
+
+main :: dyn (data: Person) -> () {
+    x : f32 = 5.0;
+	y : f64 = 3.0;
+};

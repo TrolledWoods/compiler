@@ -500,7 +500,8 @@ impl Lexer<'_> {
                 }
             }
             Some('+') | Some('-') | Some('/') | Some('*') | Some('%') | Some('^') | Some('&')
-            | Some('=') | Some('!') | Some('|') | Some('<') | Some('>') | Some('~') | Some(':') => {
+            | Some('=') | Some('!') | Some('|') | Some('<') | Some('>') | Some('~') | Some(':')
+            | Some('@') => {
                 // Operator!
                 let start = self.current_pos;
 
@@ -533,6 +534,7 @@ impl Lexer<'_> {
                     ("&", OpKind::BitAnd),
                     ("|", OpKind::BitOr),
                     (":", OpKind::Declaration),
+                    ("@", OpKind::Dereference),
                 ];
 
                 if let Some(op) = self.match_next(NON_ASSIGN_OP_MAP.iter()) {

@@ -595,6 +595,26 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
             ..
         }) => parse_struct(parser, dependencies),
         Some(Token {
+            kind:
+                TokenKind::Operator {
+                    kind: OpKind::Mul,
+                    is_assignment: false,
+                },
+            start,
+            ..
+        }) => {
+            parser.eat_token()?;
+            let internal_type = parse_type(parser, dependencies)?;
+            Ok(TypeDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start: start,
+                    end: internal_type.pos.end,
+                },
+                kind: TypeDefKind::Pointer(Box::new(internal_type)),
+            })
+        }
+        Some(Token {
             kind: TokenKind::Identifier(_),
             ..
         }) => parse_offloaded_type(parser, dependencies),

@@ -1,5 +1,5 @@
 use crate::compilation_manager::{
-    CompilationUnit, CompilationUnitId, CompileManager, CompileManagerError, Identifier,
+    CompilationUnitId, CompileManager, CompileManagerError, Identifier,
 };
 use crate::lexer::SourcePos;
 use crate::misc::collect_to_vec_if_ok;
@@ -14,6 +14,39 @@ pub struct TypeDef {
 }
 
 impl TypeDef {
+    pub fn get_unsized_dependencies<E>(
+        &self,
+        mut on_find_dependency: &mut impl FnMut(TinyString) -> Result<(), E>,
+    ) -> Result<(), E> {
+        use TypeDefKind::*;
+        match &self.kind {
+            Offload(name) => on_find_dependency(*name)?,
+            Tuple(members) => {
+                for member in members {
+                    member.get_unsized_dependencies(on_find_dependency)?;
+                }
+            }
+            Pointer(data) => data.get_unsized_dependencies(on_find_dependency)?,
+            FunctionPtr(header) => {
+                for member in &header.args {
+                    member.get_unsized_dependencies(on_find_dependency)?;
+                }
+
+                for member in &header.returns {
+                    member.get_unsized_dependencies(on_find_dependency)?;
+                }
+            }
+            Struct(members) => {
+                for (_, member) in members {
+                    member.get_unsized_dependencies(on_find_dependency)?;
+                }
+            }
+            Primitive(kind) => (),
+        }
+
+        Ok(())
+    }
+
     pub fn get_dependencies<E>(
         &self,
         mut on_find_dependency: &mut impl FnMut(TinyString) -> Result<(), E>,
@@ -26,7 +59,8 @@ impl TypeDef {
                     member.get_dependencies(on_find_dependency)?;
                 }
             }
-            FunctionPtr(header) => unimplemented!(),
+            Pointer(data) => (),
+            FunctionPtr(header) => (),
             Struct(members) => {
                 for (_, member) in members {
                     member.get_dependencies(on_find_dependency)?;
@@ -47,6 +81,7 @@ impl Display for TypeDef {
 
 pub enum TypeDefKind {
     Offload(TinyString),
+    Pointer(Box<TypeDef>),
     Tuple(Vec<TypeDef>),
     FunctionPtr(FunctionHeader<TypeDef>),
     Struct(Vec<(TinyString, TypeDef)>),
@@ -70,6 +105,9 @@ impl Display for TypeDefKind {
             }
             Primitive(kind) => {
                 write!(f, "{:?}", kind)?;
+            }
+            Pointer(data) => {
+                write!(f, "*{}", data)?;
             }
             Tuple(members) => {
                 write!(f, "(")?;
@@ -102,7 +140,8 @@ impl Display for TypeDefKind {
 pub enum ResolvedTypeKind {
     Offload(NamedTypeId),
     Tuple(Vec<(usize, ResolvedTypeId)>),
-    FunctionPtr(Vec<(usize, ResolvedTypeId)>, Vec<(usize, ResolvedTypeId)>),
+    Pointer,
+    FunctionPtr,
     Struct(Vec<(usize, TinyString, ResolvedTypeId)>),
     Primitive(PrimitiveKind),
 }
@@ -208,11 +247,15 @@ pub fn insert_resolved_type(
     id
 }
 
-/// Figures out the size and align of a type
+/// Figures out the size and align of a type.
+/// Expects that any named type in the definition
+/// is sized.
+/// It may add more ResolvedTypes(should probably rename that to SizedType or smth)
 pub fn size_type_def(
     manager: &CompileManager,
     namespace_id: NamespaceId,
     type_def: &TypeDef,
+    recursion_guard: NamedTypeId,
 ) -> Result<(usize, usize, ResolvedTypeId), CompileManagerError> {
     match &type_def.kind {
         TypeDefKind::Offload(reference) => {
@@ -221,14 +264,21 @@ pub fn size_type_def(
                 .get_member(namespace_id, *reference)
                 .unwrap();
 
-            let (named_type_id, named_type) =
-                manager.get_named_type_or(id, |window| CompileManagerError::ExpectedType {
-                    pos: type_def.pos.clone(),
-                    reference_pos: window.pos,
-                })?;
+            let (named_type_id, named_type) = match id {
+                CompilationUnitId::NamedType(named_type_id) => {
+                    if named_type_id == recursion_guard {
+                        unimplemented!("Recursion while sizing a type!");
+                    }
+
+                    (
+                        named_type_id,
+                        manager.named_types.get(named_type_id).unwrap(),
+                    )
+                }
+            };
 
             let (size, align, _) = named_type.fully_sized.done().expect(
-                "Cannot size a type definition if the types it depends on aren't resolved either",
+                "Cannot size a type definition if the types it depends on aren't sized either",
             );
 
             let id = insert_resolved_type(
@@ -242,13 +292,37 @@ pub fn size_type_def(
 
             Ok((*size, *align, id))
         }
+        TypeDefKind::Pointer(_) => {
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size: 8,
+                    align: 8,
+                    kind: ResolvedTypeKind::Pointer,
+                },
+            );
+
+            Ok((8, 8, id))
+        }
+        TypeDefKind::FunctionPtr(_) => {
+            let id = insert_resolved_type(
+                manager,
+                ResolvedTypeDef {
+                    size: 8,
+                    align: 8,
+                    kind: ResolvedTypeKind::FunctionPtr,
+                },
+            );
+
+            Ok((8, 8, id))
+        }
         TypeDefKind::Tuple(members) => {
             let mut resolved_members = Vec::with_capacity(members.len());
             let mut size = 0;
             let mut align = 0;
             for member in members {
                 let (member_size, member_align, new_member) =
-                    size_type_def(manager, namespace_id, member)?;
+                    size_type_def(manager, namespace_id, member, recursion_guard)?;
                 // :^> best align system ever!!!
                 if member_align != 0 {
                     if member_align >= align {
@@ -281,7 +355,7 @@ pub fn size_type_def(
 
             for (name, member) in members {
                 let (member_size, member_align, new_member) =
-                    size_type_def(manager, namespace_id, member)?;
+                    size_type_def(manager, namespace_id, member, recursion_guard)?;
                 // :^> best align system ever!!!
                 if member_align != 0 {
                     if member_align >= align {
@@ -321,6 +395,5 @@ pub fn size_type_def(
 
             Ok((size, align, id))
         }
-        _ => unimplemented!(),
     }
 }

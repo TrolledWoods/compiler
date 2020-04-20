@@ -249,6 +249,12 @@ impl CompileManager {
                             )
                         })?;
 
+                    if dependency_id == CompilationUnitId::NamedType(type_id) {
+                        // References self? This is garbage! Self has
+                        // to be references through a poitner
+                        unimplemented!("TODO: Error message for self referencing");
+                    }
+
                     let (_, mut named_type) =
                         self.get_named_type_mut_or(dependency_id, |general_comp_unit| {
                             CompileManagerError::ExpectedType {
@@ -286,7 +292,7 @@ impl CompileManager {
                 // all our dependencies on other named types
                 // are resolved.
                 let (size, align, resolved_id) =
-                    types::size_type_def(self, *namespace_id, definition)?;
+                    types::size_type_def(self, *namespace_id, definition, type_id)?;
 
                 let dependants =
                     std::mem::replace(fully_sized, CompUnitStage::Done((size, align, resolved_id)));
@@ -453,66 +459,6 @@ pub struct CompUnitWindowMut<'a> {
     pub pos: SourcePos,
     pub location: NamespaceId,
     pub dependencies: &'a mut BTreeSet<CompilationUnitId>,
-}
-
-#[derive(Debug)]
-pub enum CompilationUnit<Defined, Resolved> {
-    Poisoned,
-    Defined {
-        namespace_id: NamespaceId,
-        definition: Defined,
-        dependencies: Vec<(TinyString, Vec<SourcePos>)>,
-        dependants: Vec<CompilationUnitId>,
-    },
-    DependencyWaiting {
-        namespace_id: NamespaceId,
-        definition: Defined,
-        n_dependencies: u32,
-        dependants: Vec<CompilationUnitId>,
-    },
-    Resolved(Resolved),
-}
-
-impl<D, R> CompilationUnit<D, R> {
-    fn create_window<'a>(&'a mut self) -> GeneralCompilationUnit<'a> {
-        match self {
-            CompilationUnit::Poisoned => GeneralCompilationUnit::Poisoned,
-            CompilationUnit::Defined {
-                namespace_id,
-                dependencies,
-                dependants,
-                ..
-            } => GeneralCompilationUnit::Defined {
-                namespace_id,
-                dependencies,
-                dependants,
-            },
-            CompilationUnit::DependencyWaiting {
-                n_dependencies,
-                dependants,
-                ..
-            } => GeneralCompilationUnit::DependencyWaiting {
-                n_dependencies,
-                dependants,
-            },
-            CompilationUnit::Resolved { .. } => GeneralCompilationUnit::Resolved,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum GeneralCompilationUnit<'a> {
-    Poisoned,
-    Defined {
-        namespace_id: &'a mut NamespaceId,
-        dependencies: &'a mut Vec<(TinyString, Vec<SourcePos>)>,
-        dependants: &'a mut Vec<CompilationUnitId>,
-    },
-    DependencyWaiting {
-        n_dependencies: &'a mut u32,
-        dependants: &'a mut Vec<CompilationUnitId>,
-    },
-    Resolved,
 }
 
 #[derive(Clone, Debug, PartialEq)]

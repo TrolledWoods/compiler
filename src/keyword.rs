@@ -9,15 +9,15 @@ pub enum Keyword {
     Return,
 
     // Types
-    Struct,
     Union,
-    Type,
     Enum,
     Extern,
 
     // Namespaces
     Use,
     Module,
-    Public,
+    Const,
+    TypeDef,
+    Alias,
     Load,
 }

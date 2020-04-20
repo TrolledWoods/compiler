@@ -1,13 +1,13 @@
-Vec2f :: struct {
+type Vec2 = {
     x: f32,
 	y: f32,
 };
 
-Person :: struct {
-    pos: Vec2f,
+type Substructs = {
+    pos: { x: f32, y: f32 },
+	vel: { x: f32, y: f32 },
 };
 
-main :: dyn (data: Person) -> () {
-    x : f32 = 5.0;
-	y : f64 = 3.0;
-};
+// Vec is a different type
+// than Vec2.
+type Vec = Vec2;

@@ -38,6 +38,7 @@ pub enum ParsingActivity {
     ConstantValue,
     Namespace,
     LoadNamespace,
+    TypeDef,
 }
 
 impl Display for ParsingActivity {
@@ -54,6 +55,7 @@ impl Display for ParsingActivity {
             ConstantValue => write!(f, "constant value"),
             Namespace => write!(f, "namespace"),
             LoadNamespace => write!(f, "external namespace load"),
+            TypeDef => write!(f, "type definition"),
         }
     }
 }
@@ -232,7 +234,16 @@ pub fn parse_namespace(
             }
         }
 
-        parse_constant_definition(parser, id)?;
+        match token {
+            Token {
+                kind: TokenKind::Keyword(Keyword::TypeDef),
+                ..
+            } => {
+                parse_type_def(parser, id)?;
+            }
+
+            _ => unimplemented!(),
+        }
     }
 
     if !in_block {
@@ -342,46 +353,29 @@ pub fn parse_identifier(
 
 // Doesn't have to return anything, as it adds a compilation unit
 // to the CompilationManager anyway
-pub fn parse_constant_definition(
+pub fn parse_type_def(
     parser: &mut Parser<'_>,
     namespace_id: NamespaceId,
 ) -> Result<(), ParseError> {
+    parse_keyword(parser, Keyword::TypeDef, ParsingActivity::Constant)?;
+
     let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
 
-    // Expect a constant assignment
-    // TODO: Parse an optional type parameter here
     parse_kind(
         parser,
         &TokenKind::Operator {
-            kind: OpKind::Constant,
+            kind: OpKind::Assignment,
             is_assignment: false,
         },
-        ParsingActivity::Constant,
+        ParsingActivity::TypeDef,
     )?;
 
-    // Now figure out what kind of constant it is
-    let token = parser.peek_token(0)?;
-    match token {
-        // Assume for now that it's a type.
-        // That won't be the case forever, though
-        c => {
-            let mut _deps = Vec::new();
-            let type_def = parse_type(parser, &mut _deps)?;
-            parser
-                .manager
-                .insert_named_type(namespace_id, identifier, type_def)?;
-        } // _ => {
-          //     Err(UnexpectedTokenError {
-          //         file: parser.file,
-          //         activity: ParsingActivity::ConstantValue,
-          //         expected: vec![ExpectedValue::ConstantDefinitionValue],
-          //         got: token.into(),
-          //     })?;
-          // }
-    }
+    let mut _deps = Vec::new();
+    let type_def = parse_type(parser, &mut _deps)?;
+    parser
+        .manager
+        .insert_named_type(namespace_id, identifier, type_def)?;
 
-    // Even const expressions have to have semicolons.
-    // (Mostly for consistancy reasons)
     parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
 
     Ok(())
@@ -568,8 +562,6 @@ fn parse_struct(
     parser: &mut Parser,
     dependencies: &mut Dependencies,
 ) -> Result<TypeDef, ParseError> {
-    parse_keyword(parser, Keyword::Struct, ParsingActivity::Struct)?;
-
     let (pos, members) = parse_named_list(
         parser,
         ListGrammar::curly(),
@@ -591,7 +583,7 @@ fn parse_struct(
 fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<TypeDef, ParseError> {
     match parser.peek_token(0)? {
         Some(Token {
-            kind: TokenKind::Keyword(Keyword::Struct),
+            kind: TokenKind::OpeningBracket(BracketKind::Curly),
             ..
         }) => parse_struct(parser, dependencies),
         Some(Token {

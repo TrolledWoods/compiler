@@ -8,7 +8,8 @@ use crate::string_pile::TinyString;
 use crate::types::{
     self, NamedTypeId, ResolvedTypeDef, ResolvedTypeId, ResolvedTypeKind, TypeDef, TypeDefKind,
 };
-use std::collections::HashMap;
+use chashmap::{ReadGuard, WriteGuard};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
 
 pub type Dependencies = Vec<(TinyString, Vec<SourcePos>)>;
@@ -33,6 +34,27 @@ pub enum CompileManagerError {
         dependency: (TinyString, Vec<SourcePos>),
     },
     Poisoned,
+}
+
+impl CompileManagerError {
+    pub fn dependency_not_in_namespace(
+        error: NamespaceAccessError,
+        dependant: SourcePos,
+        // dependency: (TinyString, Vec<SourcePos>),
+    ) -> CompileManagerError {
+        let dependency = ("".into(), Vec::new());
+        match error {
+            NamespaceAccessError::DoesNotExist => CompileManagerError::UndefinedDependency {
+                dependant,
+                dependency,
+            },
+            NamespaceAccessError::Ambiguous(defined) => CompileManagerError::AmbiguousDependency {
+                dependant,
+                dependency,
+                defined: defined.into_iter().map(|(v, _)| v).collect(),
+            },
+        }
+    }
 }
 
 impl CompileError for CompileManagerError {
@@ -105,7 +127,7 @@ pub struct CompileManager {
     // to something better. Maybe a concurrent queue of some sort?
     ready_to_compile: Mutex<Vec<CompilationUnitId>>,
 
-    pub named_types: CIdMap<NamedTypeId, CompilationUnit<TypeDef, (TypeDef, ResolvedTypeId)>>,
+    pub named_types: CIdMap<NamedTypeId, NamedTypeCompUnit>,
     pub resolved_types: CIdMap<ResolvedTypeId, ResolvedTypeDef>,
 
     /// This is basically a reverse mapping from a type to a type id.
@@ -127,18 +149,46 @@ impl CompileManager {
         }
     }
 
+    pub fn get_named_type_mut_or<'a, E>(
+        &'a self,
+        id: CompilationUnitId,
+        _err: impl FnOnce(CompUnitWindow<'a>) -> E,
+    ) -> Result<(NamedTypeId, WriteGuard<'a, NamedTypeId, NamedTypeCompUnit>), E> {
+        match id {
+            CompilationUnitId::NamedType(named_id) => Ok((
+                named_id,
+                self.named_types
+                    .get_mut(named_id)
+                    .expect("Invalid NamedTypeId"),
+            )),
+        }
+    }
+
+    pub fn get_named_type_or<'a, E>(
+        &'a self,
+        id: CompilationUnitId,
+        _err: impl FnOnce(CompUnitWindow<'a>) -> E,
+    ) -> Result<(NamedTypeId, ReadGuard<'a, NamedTypeId, NamedTypeCompUnit>), E> {
+        match id {
+            CompilationUnitId::NamedType(named_id) => Ok((
+                named_id,
+                self.named_types.get(named_id).expect("Invalid NamedTypeId"),
+            )),
+        }
+    }
+
     pub fn insert_named_type(
         &self,
         namespace_id: NamespaceId,
         identifier: Identifier,
         definition: TypeDef,
-        dependencies: Dependencies,
     ) -> Result<NamedTypeId, NamespaceError> {
-        let type_id = self.named_types.insert(CompilationUnit::Defined {
-            namespace_id,
+        let type_id = self.named_types.insert(NamedTypeCompUnit {
+            location: namespace_id,
             definition,
-            dependencies,
-            dependants: Vec::new(),
+            dependencies: BTreeSet::new(),
+            fully_sized: CompUnitStage::unresolved(),
+            stage: NamedTypeStage::Defined,
         });
         let id = CompilationUnitId::NamedType(type_id);
 
@@ -169,154 +219,240 @@ impl CompileManager {
         Ok(())
     }
 
+    /// Compiles a NamedType a bit further.
+    /// This requires all the old dependencies to be fullfilled
     fn advance_type(&self, type_id: NamedTypeId) -> Result<(), CompileManagerError> {
         let mut comp_unit = self
             .named_types
             .get_mut(type_id)
             .expect("Invalid NamedTypeId");
+        let NamedTypeCompUnit {
+            location: namespace_id,
+            stage,
+            dependencies,
+            definition,
+            fully_sized,
+        } = &mut comp_unit as &mut NamedTypeCompUnit;
 
-        let owned_comp_unit = std::mem::replace(
-            &mut comp_unit as &mut CompilationUnit<TypeDef, _>,
-            CompilationUnit::Poisoned,
-        );
-        match owned_comp_unit {
-            CompilationUnit::Defined {
-                namespace_id,
-                definition,
-                dependencies,
-                dependants,
-            } => {
-                // Hook up all dependencies
-                let mut n_dependencies = 0;
-                for (dependency, locations) in dependencies {
-                    match self.namespace_manager.get_member(namespace_id, dependency) {
-                        Ok((pos, id)) => {
-                            if id == CompilationUnitId::NamedType(type_id) {
-                                return Err(CompileManagerError::DependingOnSelf {
-                                    dependant: Identifier {
-                                        data: dependency,
-                                        pos,
-                                    },
-                                    dependency: (dependency, locations),
-                                });
+        match stage {
+            NamedTypeStage::Defined => {
+                *stage = NamedTypeStage::Poisoned;
+
+                definition.get_dependencies(&mut |dep| {
+                    let (_dependency_pos, dependency_id) = self
+                        .namespace_manager
+                        .get_member(*namespace_id, dep)
+                        .map_err(|err| {
+                            CompileManagerError::dependency_not_in_namespace(
+                                err,
+                                definition.pos.clone(),
+                            )
+                        })?;
+
+                    let (_, mut named_type) =
+                        self.get_named_type_mut_or(dependency_id, |general_comp_unit| {
+                            CompileManagerError::ExpectedType {
+                                pos: definition.pos.clone(),
+                                reference_pos: general_comp_unit.pos,
                             }
+                        })?;
 
-                            self.modify_general_compilation_unit(id, |unit| match unit {
-                                GeneralCompilationUnit::Poisoned => {
-                                    Err(CompileManagerError::Poisoned)
-                                }
-                                GeneralCompilationUnit::Defined { dependants, .. } => {
-                                    dependants.push(CompilationUnitId::NamedType(type_id));
-                                    n_dependencies += 1;
-                                    Ok(())
-                                }
-                                GeneralCompilationUnit::DependencyWaiting {
-                                    dependants, ..
-                                } => {
-                                    dependants.push(CompilationUnitId::NamedType(type_id));
-                                    n_dependencies += 1;
-                                    Ok(())
-                                }
-                                GeneralCompilationUnit::Resolved => Ok(()),
-                            })?;
-                        }
-                        Err(NamespaceAccessError::DoesNotExist) => {
-                            return Err(CompileManagerError::UndefinedDependency {
-                                dependant: definition.pos.clone(),
-                                dependency: (dependency, locations),
-                            });
-                        }
-                        Err(NamespaceAccessError::Ambiguous(values)) => {
-                            return Err(CompileManagerError::AmbiguousDependency {
-                                dependant: definition.pos.clone(),
-                                dependency: (dependency, locations),
-                                defined: values.into_iter().map(|v| v.0).collect(),
-                            });
-                        }
+                    // Depend on the fully sized field of the
+                    // named_type. TODO: Make this the sized field
+                    if named_type
+                        .fully_sized
+                        .insert_dependency(CompilationUnitId::NamedType(type_id))
+                    {
+                        dependencies.insert(dependency_id);
                     }
-                }
 
-                *comp_unit = CompilationUnit::DependencyWaiting {
-                    namespace_id,
-                    definition,
-                    n_dependencies,
-                    dependants,
-                };
+                    Ok(())
+                })?;
 
-                if n_dependencies == 0 {
-                    self.add_ready_compilation_unit(CompilationUnitId::NamedType(type_id));
-                }
-            }
-            CompilationUnit::DependencyWaiting {
-                namespace_id,
-                definition,
-                n_dependencies,
-                dependants,
-            } => {
-                assert_eq!(
-                    n_dependencies, 0,
-                    "DependencyWaiting wasn't ready to compile"
-                );
+                *stage = NamedTypeStage::LocateNames;
 
-                let (_size, _align, def_id) =
-                    types::resolve_type_def(self, namespace_id, &definition)?;
-
-                println!("Named type!");
-                println!(
-                    "\tsize: {} bytes, align: {} bytes, id: {:?}",
-                    _size, _align, def_id
-                );
-                println!("\ttype: {}", &definition);
-
-                *comp_unit = CompilationUnit::Resolved((definition, def_id));
-
-                // Remove a dependency from the dependants
-                for dependant_id in dependants {
-                    self.modify_general_compilation_unit(dependant_id, |v| {
-                        use GeneralCompilationUnit::*;
-                        match v as GeneralCompilationUnit<'_> {
-                            Poisoned => Err(CompileManagerError::Poisoned),
-                            DependencyWaiting {
-                                n_dependencies, ..
-                            } => {
-                                assert_ne!(*n_dependencies, 0);
-                                *n_dependencies -= 1;
-
-                                if *n_dependencies == 0 {
-                                    self.add_ready_compilation_unit(dependant_id);
-                                }
-
-                                Ok(())
-                            },
-                            _ => unreachable!("Only 'DependencyWaiting' compilation units should have active dependencies"),
-                        }
-                    })?;
+                // If there were no dependencies, just advance the
+                // type directly
+                if dependencies.len() == 0 {
+                    std::mem::drop(comp_unit);
+                    self.advance_type(type_id);
                 }
             }
-            _ => unimplemented!(),
+            NamedTypeStage::LocateNames => {
+                *stage = NamedTypeStage::Poisoned;
+
+                // Size the type!
+                // This is only fine because we know that
+                // all our dependencies on other named types
+                // are resolved.
+                let (size, align, resolved_id) =
+                    types::size_type_def(self, *namespace_id, definition)?;
+
+                let dependants =
+                    std::mem::replace(fully_sized, CompUnitStage::Done((size, align, resolved_id)));
+
+                if let CompUnitStage::Unresolved { dependants } = dependants {
+                    for dependant in dependants {
+                        self.remove_dependency(dependant, CompilationUnitId::NamedType(type_id));
+                    }
+                } else {
+                    unreachable!("The 'fully_sized' member has to be matched with the stage");
+                }
+
+                println!("Resolved type {}, {}", size, align);
+
+                *stage = NamedTypeStage::FullySized;
+            }
+            NamedTypeStage::FullySized => {
+                *stage = NamedTypeStage::Poisoned;
+                unreachable!();
+            }
+            NamedTypeStage::Poisoned => {}
         }
 
         Ok(())
     }
 
-    fn modify_general_compilation_unit<V>(
-        &self,
-        id: CompilationUnitId,
-        modifier: impl FnOnce(GeneralCompilationUnit) -> V,
-    ) -> V {
-        match id {
-            CompilationUnitId::NamedType(type_id) => {
-                let mut type_lock = self.named_types.get_mut(type_id).unwrap();
-                let window = type_lock.create_window();
-                modifier(window)
+    pub fn remove_dependency(&self, remove_from: CompilationUnitId, dependency: CompilationUnitId) {
+        match remove_from {
+            CompilationUnitId::NamedType(id) => {
+                let mut comp_unit = self.named_types.get_mut(id).unwrap();
+                assert!(
+                    comp_unit.dependencies.remove(&dependency),
+                    "Cannot remove a dependency that doesn't exist"
+                );
+
+                if comp_unit.dependencies.len() == 0 {
+                    self.add_ready_compilation_unit(remove_from);
+                }
             }
         }
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum CompilationUnitId {
     NamedType(NamedTypeId),
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum NamedTypeStage {
+    Poisoned,
+    Defined,
+    LocateNames,
+    FullySized,
+}
+
+pub struct NamedTypeCompUnit {
+    pub location: NamespaceId,
+    pub definition: TypeDef,
+    pub dependencies: BTreeSet<CompilationUnitId>,
+
+    // TODO: Add another sizing step here,
+    // to allow for circular pointer referencing
+    pub fully_sized: CompUnitStage<(usize, usize, ResolvedTypeId)>,
+
+    pub stage: NamedTypeStage,
+}
+
+impl CompUnit for NamedTypeCompUnit {
+    type Stage = NamedTypeStage;
+
+    fn get_window_mut<'a>(&'a mut self) -> CompUnitWindowMut<'a> {
+        CompUnitWindowMut {
+            pos: self.definition.pos.clone(),
+            location: self.location,
+            dependencies: &mut self.dependencies,
+        }
+    }
+
+    fn get_window<'a>(&'a self) -> CompUnitWindow<'a> {
+        CompUnitWindow {
+            pos: self.definition.pos.clone(),
+            location: self.location,
+            dependencies: &self.dependencies,
+        }
+    }
+
+    fn get_stage_dependants_mut<'a>(
+        &'a mut self,
+        stage: Self::Stage,
+    ) -> Option<&'a mut BTreeSet<CompilationUnitId>> {
+        match stage {
+            NamedTypeStage::Poisoned => None,
+            NamedTypeStage::Defined => None,
+            NamedTypeStage::LocateNames => None,
+            NamedTypeStage::FullySized => self.fully_sized.get_dependants_mut(),
+        }
+    }
+}
+
+pub enum CompUnitStage<T> {
+    Unresolved {
+        dependants: BTreeSet<CompilationUnitId>,
+    },
+    Done(T),
+}
+
+impl<T> CompUnitStage<T> {
+    pub fn unresolved() -> CompUnitStage<T> {
+        CompUnitStage::Unresolved {
+            dependants: BTreeSet::new(),
+        }
+    }
+
+    pub fn insert_dependency(&mut self, dep: CompilationUnitId) -> bool {
+        if let Some(dependants) = self.get_dependants_mut() {
+            dependants.insert(dep);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_dependants_mut<'a>(&'a mut self) -> Option<&'a mut BTreeSet<CompilationUnitId>> {
+        match self {
+            CompUnitStage::Unresolved { dependants } => Some(dependants),
+            CompUnitStage::Done(_) => None,
+        }
+    }
+
+    pub fn done(&self) -> Option<&T> {
+        match self {
+            CompUnitStage::Unresolved { .. } => None,
+            CompUnitStage::Done(val) => Some(val),
+        }
+    }
+
+    pub fn done_mut(&mut self) -> Option<&mut T> {
+        match self {
+            CompUnitStage::Unresolved { .. } => None,
+            CompUnitStage::Done(val) => Some(val),
+        }
+    }
+}
+
+pub trait CompUnit {
+    type Stage: Copy;
+
+    fn get_window_mut<'a>(&'a mut self) -> CompUnitWindowMut<'a>;
+    fn get_window<'a>(&'a self) -> CompUnitWindow<'a>;
+    fn get_stage_dependants_mut<'a>(
+        &'a mut self,
+        stage: Self::Stage,
+    ) -> Option<&'a mut BTreeSet<CompilationUnitId>>;
+}
+
+pub struct CompUnitWindow<'a> {
+    pub pos: SourcePos,
+    pub location: NamespaceId,
+    pub dependencies: &'a BTreeSet<CompilationUnitId>,
+}
+
+pub struct CompUnitWindowMut<'a> {
+    pub pos: SourcePos,
+    pub location: NamespaceId,
+    pub dependencies: &'a mut BTreeSet<CompilationUnitId>,
 }
 
 #[derive(Debug)]

@@ -1,10 +1,8 @@
-// We are doing this to remove clutter.
-// May be nice to remove this tag sometimes
-// when cleaning up stuff, but right now
-// the compiler is so incomplete that it just
-// makes me scroll up to find the errors/warnings I want
 #![allow(dead_code)]
 #![allow(unused_imports)]
+// TODO: Remove this, but for
+// development it doesn't matter
+#![allow(unused)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

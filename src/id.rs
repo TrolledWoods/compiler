@@ -10,7 +10,7 @@ pub trait Id: Hash + Copy + PartialEq {
 
 macro_rules! create_id {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
         pub struct $name(std::num::NonZeroU32);
 
         impl $name {

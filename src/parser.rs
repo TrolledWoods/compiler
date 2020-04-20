@@ -365,11 +365,11 @@ pub fn parse_constant_definition(
         // Assume for now that it's a type.
         // That won't be the case forever, though
         c => {
-            let mut dependencies = Vec::new();
-            let type_def = parse_type(parser, &mut dependencies)?;
+            let mut _deps = Vec::new();
+            let type_def = parse_type(parser, &mut _deps)?;
             parser
                 .manager
-                .insert_named_type(namespace_id, identifier, type_def, dependencies)?;
+                .insert_named_type(namespace_id, identifier, type_def)?;
         } // _ => {
           //     Err(UnexpectedTokenError {
           //         file: parser.file,

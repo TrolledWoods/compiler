@@ -13,49 +13,35 @@ pub struct TypeDef {
     pub kind: TypeDefKind,
 }
 
+impl TypeDef {
+    pub fn get_dependencies<E>(
+        &self,
+        mut on_find_dependency: &mut impl FnMut(TinyString) -> Result<(), E>,
+    ) -> Result<(), E> {
+        use TypeDefKind::*;
+        match &self.kind {
+            Offload(name) => on_find_dependency(*name)?,
+            Tuple(members) => {
+                for member in members {
+                    member.get_dependencies(on_find_dependency)?;
+                }
+            }
+            FunctionPtr(header) => unimplemented!(),
+            Struct(members) => {
+                for (_, member) in members {
+                    member.get_dependencies(on_find_dependency)?;
+                }
+            }
+            Primitive(kind) => (),
+        }
+
+        Ok(())
+    }
+}
+
 impl Display for TypeDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)
-    }
-}
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum ResolvedTypeKind {
-    Offload(NamedTypeId),
-    Tuple(Vec<(usize, ResolvedTypeId)>),
-    FunctionPtr(Vec<(usize, ResolvedTypeId)>, Vec<(usize, ResolvedTypeId)>),
-    Struct(Vec<(usize, TinyString, ResolvedTypeId)>),
-    Primitive(PrimitiveKind),
-}
-
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub enum PrimitiveKind {
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F32,
-    F64,
-}
-
-impl PrimitiveKind {
-    pub fn get_size_and_align(self) -> (usize, usize) {
-        use PrimitiveKind::*;
-        match self {
-            I8 => (1, 1),
-            I16 => (2, 2),
-            I32 => (4, 4),
-            I64 => (8, 8),
-            U8 => (1, 1),
-            U16 => (2, 2),
-            U32 => (4, 4),
-            U64 => (8, 8),
-            F32 => (4, 4),
-            F64 => (8, 8),
-        }
     }
 }
 
@@ -109,6 +95,47 @@ impl Display for TypeDefKind {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum ResolvedTypeKind {
+    Offload(NamedTypeId),
+    Tuple(Vec<(usize, ResolvedTypeId)>),
+    FunctionPtr(Vec<(usize, ResolvedTypeId)>, Vec<(usize, ResolvedTypeId)>),
+    Struct(Vec<(usize, TinyString, ResolvedTypeId)>),
+    Primitive(PrimitiveKind),
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum PrimitiveKind {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+}
+
+impl PrimitiveKind {
+    pub fn get_size_and_align(self) -> (usize, usize) {
+        use PrimitiveKind::*;
+        match self {
+            I8 => (1, 1),
+            I16 => (2, 2),
+            I32 => (4, 4),
+            I64 => (8, 8),
+            U8 => (1, 1),
+            U16 => (2, 2),
+            U32 => (4, 4),
+            U64 => (8, 8),
+            F32 => (4, 4),
+            F64 => (8, 8),
+        }
     }
 }
 
@@ -181,10 +208,8 @@ pub fn insert_resolved_type(
     id
 }
 
-/// Resolves a type(figures out size and align of it).
-/// All dependencies of the type_def have to be defined
-/// and resolved.
-pub fn resolve_type_def(
+/// Figures out the size and align of a type
+pub fn size_type_def(
     manager: &CompileManager,
     namespace_id: NamespaceId,
     type_def: &TypeDef,
@@ -196,36 +221,26 @@ pub fn resolve_type_def(
                 .get_member(namespace_id, *reference)
                 .unwrap();
 
-            let named_type_id = match id {
-                CompilationUnitId::NamedType(id) => id,
-                _ => {
-                    return Err(CompileManagerError::ExpectedType {
-                        pos: type_def.pos.clone(),
-                        reference_pos: member_pos,
-                    })
-                }
-            };
+            let (named_type_id, named_type) =
+                manager.get_named_type_or(id, |window| CompileManagerError::ExpectedType {
+                    pos: type_def.pos.clone(),
+                    reference_pos: window.pos,
+                })?;
 
-            let referencing_id = {
-                let named_type = manager.named_types.get(named_type_id).unwrap();
-                match &named_type as &CompilationUnit<_, _> {
-                    CompilationUnit::Resolved((_, id)) => *id,
-                    _ => unreachable!("Tried accessing a non compiled NamedType"),
-                }
-            };
-
-            let referencing = manager.resolved_types.get(referencing_id).unwrap();
+            let (size, align, _) = named_type.fully_sized.done().expect(
+                "Cannot size a type definition if the types it depends on aren't resolved either",
+            );
 
             let id = insert_resolved_type(
                 manager,
                 ResolvedTypeDef {
-                    size: referencing.size,
-                    align: referencing.align,
+                    size: *size,
+                    align: *align,
                     kind: ResolvedTypeKind::Offload(named_type_id),
                 },
             );
 
-            Ok((referencing.size, referencing.align, id))
+            Ok((*size, *align, id))
         }
         TypeDefKind::Tuple(members) => {
             let mut resolved_members = Vec::with_capacity(members.len());
@@ -233,7 +248,7 @@ pub fn resolve_type_def(
             let mut align = 0;
             for member in members {
                 let (member_size, member_align, new_member) =
-                    resolve_type_def(manager, namespace_id, member)?;
+                    size_type_def(manager, namespace_id, member)?;
                 // :^> best align system ever!!!
                 if member_align != 0 {
                     if member_align >= align {
@@ -266,7 +281,7 @@ pub fn resolve_type_def(
 
             for (name, member) in members {
                 let (member_size, member_align, new_member) =
-                    resolve_type_def(manager, namespace_id, member)?;
+                    size_type_def(manager, namespace_id, member)?;
                 // :^> best align system ever!!!
                 if member_align != 0 {
                     if member_align >= align {

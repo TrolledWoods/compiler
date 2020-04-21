@@ -1,16 +1,32 @@
 type Vec2 = {
-    x: f32,
-	y: f32,
+    f32,
+	f32,
 };
 
-type Substructs = {
+type MoreStuff = {
+    x: {},
+	y: { f32 },
+	z: { x: f32, y: f32 },
+};
+
+// {} is a zst type. Notice that it could be both a struct
+// and a tuple
+
+// A named collection:
+// { x: f32, y: f32 }
+//
+// An unnamed collection:
+// { f32, f32 }
+
+type SubCollections = {
     pos: { x: f32, y: f32 },
 	vel: { x: f32, y: f32 },
 };
+
+// Function pointer: {} -> {}
 
 // Vec is a different type
 // than Vec2.
 type Vec = Vec2;
 
-const HI = 3;
-const HI2 = 3 * 7 + 3 * 5 ^ 1;
+const HI2 = "Hello world!" * 3;

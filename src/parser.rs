@@ -6,7 +6,7 @@ use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, To
 use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator::OpKind;
 use crate::string_pile::TinyString;
-use crate::types::{FunctionHeader, PrimitiveKind, TypeDef, TypeDefKind};
+use crate::types::{CollectionDefKind, FunctionHeader, PrimitiveKind, TypeDef, TypeDefKind};
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
@@ -329,6 +329,30 @@ fn parse_value(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError
                 end: end,
             },
             kind: ast::ExpressionDefKind::IntLiteral(value),
+        }),
+        Some(Token {
+            kind: TokenKind::FloatLiteral(value),
+            start,
+            end,
+        }) => Ok(ast::ExpressionDef {
+            pos: SourcePos {
+                file: parser.file,
+                start: start,
+                end: end,
+            },
+            kind: ast::ExpressionDefKind::FloatLiteral(value),
+        }),
+        Some(Token {
+            kind: TokenKind::StringLiteral(value),
+            start,
+            end,
+        }) => Ok(ast::ExpressionDef {
+            pos: SourcePos {
+                file: parser.file,
+                start: start,
+                end: end,
+            },
+            kind: ast::ExpressionDefKind::StringLiteral(value),
         }),
         c => Err(UnexpectedTokenError {
             file: parser.file,
@@ -719,26 +743,29 @@ fn parse_list<V>(
     }
 }
 
-fn parse_struct(
+fn parse_collection(
     parser: &mut Parser,
     dependencies: &mut Dependencies,
-) -> Result<TypeDef, ParseError> {
-    let (pos, members) = parse_named_list(
+) -> Result<(SourcePos, CollectionDefKind), ParseError> {
+    let (pos, members) = parse_named_or_unnamed_list(
         parser,
         ListGrammar::curly(),
         |parser| parse_type(parser, dependencies),
         ParsingActivity::StructMember,
     )?;
 
-    let members: Vec<(TinyString, TypeDef)> = members
-        .into_iter()
-        .map(|(name, v)| (name.data, v))
-        .collect();
+    match members {
+        ListKind::Empty => Ok((pos, CollectionDefKind::Unnamed(vec![]))),
+        ListKind::Named(members) => {
+            let members: Vec<(TinyString, TypeDef)> = members
+                .into_iter()
+                .map(|(name, v)| (name.data, v))
+                .collect();
 
-    Ok(TypeDef {
-        pos,
-        kind: TypeDefKind::Struct(members),
-    })
+            Ok((pos, CollectionDefKind::Named(members)))
+        }
+        ListKind::Unnamed(members) => Ok((pos, CollectionDefKind::Unnamed(members))),
+    }
 }
 
 fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<TypeDef, ParseError> {
@@ -746,7 +773,57 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
         Some(Token {
             kind: TokenKind::OpeningBracket(BracketKind::Curly),
             ..
-        }) => parse_struct(parser, dependencies),
+        }) => {
+            let (pos, collection) = parse_collection(parser, dependencies)?;
+
+            if let Some(_) = try_parse_kind(
+                parser,
+                &TokenKind::Operator {
+                    kind: OpKind::ReturnArrow,
+                    is_assignment: false,
+                },
+            )? {
+                // This is a function pointer!
+                let args = match collection {
+                    CollectionDefKind::Unnamed(members) => members,
+                    _ => {
+                        panic!(
+                            "TODO: Cannot have a Named collection as the argument type for a function");
+                    }
+                };
+
+                let (return_pos, returns) = parse_collection(parser, dependencies)?;
+
+                let returns = match returns {
+                    CollectionDefKind::Unnamed(members) => members,
+                    _ => {
+                        panic!(
+                            "TODO: Cannot have a Named collection as the return type for a function");
+                    }
+                };
+
+                Ok(TypeDef {
+                    pos: SourcePos {
+                        file: parser.file,
+                        start: pos.start,
+                        end: return_pos.end,
+                    },
+                    kind: TypeDefKind::FunctionPtr(FunctionHeader { args, returns }),
+                })
+            } else {
+                // Just a collection
+                match collection {
+                    CollectionDefKind::Unnamed(members) => Ok(TypeDef {
+                        pos,
+                        kind: TypeDefKind::Tuple(members),
+                    }),
+                    CollectionDefKind::Named(members) => Ok(TypeDef {
+                        pos,
+                        kind: TypeDefKind::Struct(members),
+                    }),
+                }
+            }
+        }
         Some(Token {
             kind:
                 TokenKind::Operator {
@@ -771,41 +848,6 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
             kind: TokenKind::Identifier(_),
             ..
         }) => parse_offloaded_type(parser, dependencies),
-        Some(Token {
-            kind: TokenKind::OpeningBracket(BracketKind::Paren),
-            ..
-        }) => {
-            let (pos, tuple) = parse_tuple_type(parser, dependencies)?;
-
-            if let Some(_) = try_parse_kind(
-                parser,
-                &TokenKind::Operator {
-                    kind: OpKind::ReturnArrow,
-                    is_assignment: false,
-                },
-            )? {
-                // This is a function pointer!
-                let (return_pos, return_tuple) = parse_tuple_type(parser, dependencies)?;
-
-                Ok(TypeDef {
-                    pos: SourcePos {
-                        file: parser.file,
-                        start: pos.start,
-                        end: return_pos.end,
-                    },
-                    kind: TypeDefKind::FunctionPtr(FunctionHeader {
-                        args: tuple,
-                        returns: return_tuple,
-                    }),
-                })
-            } else {
-                // This is just a tuple
-                Ok(TypeDef {
-                    pos,
-                    kind: TypeDefKind::Tuple(tuple),
-                })
-            }
-        }
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Type,
@@ -818,6 +860,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
 
 fn parse_tuple_type(
     parser: &mut Parser,
+
     dependencies: &mut Dependencies,
 ) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
     let (pos, members) = parse_list(

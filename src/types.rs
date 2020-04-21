@@ -82,6 +82,11 @@ impl Display for TypeDef {
     }
 }
 
+pub enum CollectionDefKind {
+    Named(Vec<(TinyString, TypeDef)>),
+    Unnamed(Vec<TypeDef>),
+}
+
 pub enum TypeDefKind {
     Offload(TinyString),
     Pointer(Box<TypeDef>),

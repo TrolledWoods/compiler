@@ -12,4 +12,5 @@ type Substructs = {
 // than Vec2.
 type Vec = Vec2;
 
-const HI = ;
+const HI = 3;
+const HI2 = 3 * 7 + 3 * 5 ^ 1;

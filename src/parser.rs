@@ -1,3 +1,4 @@
+use crate::ast;
 use crate::compilation_manager::{CompileManager, Dependencies, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
@@ -39,6 +40,7 @@ pub enum ParsingActivity {
     Namespace,
     LoadNamespace,
     TypeDef,
+    Expression,
 }
 
 impl Display for ParsingActivity {
@@ -55,6 +57,7 @@ impl Display for ParsingActivity {
             ConstantValue => write!(f, "constant value"),
             Namespace => write!(f, "namespace"),
             LoadNamespace => write!(f, "external namespace load"),
+            Expression => write!(f, "expression"),
             TypeDef => write!(f, "type definition"),
         }
     }
@@ -161,6 +164,7 @@ pub enum ExpectedValue {
     FileNamespace,
     Type,
     ConstantDefinitionValue,
+    Expression,
 
     Kind(TokenKind),
 
@@ -177,6 +181,7 @@ impl Display for ExpectedValue {
             FileNamespace => write!(f, "namespaced file"),
             Type => write!(f, "type"),
             ConstantDefinitionValue => write!(f, "constant definition value"),
+            Expression => write!(f, "expression"),
             Kind(kind) => write!(f, "kind '{:?}'", kind),
             Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
             ClosingBracket(kind) => write!(f, "closing {:?}", kind),
@@ -265,6 +270,76 @@ pub fn parse_namespace(
     }
 }
 
+fn parse_expression(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError> {
+    parse_expression_rec(parser, 0)
+}
+
+fn parse_expression_rec(
+    parser: &mut Parser<'_>,
+    priority: u8,
+) -> Result<ast::ExpressionDef, ParseError> {
+    let mut expression = Some(parse_value(parser)?);
+
+    loop {
+        match parser.peek_token(0)? {
+            Some(Token {
+                kind:
+                    TokenKind::Operator {
+                        kind,
+                        is_assignment: false,
+                    },
+                start,
+                end,
+            }) => {
+                let op_priority: u8 = kind.priority().into();
+
+                if op_priority > priority {
+                    parser.eat_token()?;
+
+                    let left = expression.take().unwrap();
+                    let right = parse_expression_rec(parser, op_priority)?;
+
+                    expression = Some(ast::ExpressionDef {
+                        kind: ast::ExpressionDefKind::Operator(kind, vec![left, right]),
+                        pos: SourcePos {
+                            file: parser.file,
+                            start,
+                            end,
+                        },
+                    });
+                } else {
+                    break Ok(expression.unwrap());
+                }
+            }
+            _ => break Ok(expression.unwrap()),
+        }
+    }
+}
+
+fn parse_value(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError> {
+    match parser.eat_token()? {
+        Some(Token {
+            kind: TokenKind::IntLiteral(value),
+            start,
+            end,
+        }) => Ok(ast::ExpressionDef {
+            pos: SourcePos {
+                file: parser.file,
+                start: start,
+                end: end,
+            },
+            kind: ast::ExpressionDefKind::IntLiteral(value),
+        }),
+        c => Err(UnexpectedTokenError {
+            file: parser.file,
+            activity: ParsingActivity::Expression,
+            expected: vec![ExpectedValue::Expression],
+            got: c.into(),
+        }
+        .into()),
+    }
+}
+
 fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), ParseError> {
     parse_keyword(parser, Keyword::Const, ParsingActivity::Constant)?;
 
@@ -279,7 +354,8 @@ fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), Pa
         ParsingActivity::Constant,
     )?;
 
-    // let expression = parse_expression(parser, ParsingActivity::Constant)?;
+    let expression = parse_expression(parser)?;
+    println!("{:?}", expression);
 
     parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
 

@@ -4,6 +4,7 @@ use crate::operator::OpKind;
 use crate::string_pile::TinyString;
 use crate::types::TypeDef;
 
+#[derive(Debug)]
 pub struct ExpressionDef {
     pub pos: SourcePos,
     pub kind: ExpressionDefKind,
@@ -50,6 +51,7 @@ impl ExpressionDef {
     }
 }
 
+#[derive(Debug)]
 pub enum ExpressionDefKind {
     Operator(OpKind, Vec<ExpressionDef>),
     UnaryOperator(OpKind, Box<ExpressionDef>),

@@ -11,3 +11,5 @@ type Substructs = {
 // Vec is a different type
 // than Vec2.
 type Vec = Vec2;
+
+const HI = ;

@@ -15,6 +15,7 @@ extern crate lazy_static;
 #[macro_use]
 mod id;
 
+mod ast;
 mod compilation_manager;
 mod debug_printing;
 mod error;

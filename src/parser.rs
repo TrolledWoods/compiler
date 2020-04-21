@@ -241,6 +241,12 @@ pub fn parse_namespace(
             } => {
                 parse_type_def(parser, id)?;
             }
+            Token {
+                kind: TokenKind::Keyword(Keyword::Const),
+                ..
+            } => {
+                parse_constant_def(parser, id)?;
+            }
 
             _ => unimplemented!(),
         }
@@ -257,6 +263,27 @@ pub fn parse_namespace(
         }
         .into())
     }
+}
+
+fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), ParseError> {
+    parse_keyword(parser, Keyword::Const, ParsingActivity::Constant)?;
+
+    let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
+
+    parse_kind(
+        parser,
+        &TokenKind::Operator {
+            kind: OpKind::Assignment,
+            is_assignment: false,
+        },
+        ParsingActivity::Constant,
+    )?;
+
+    // let expression = parse_expression(parser, ParsingActivity::Constant)?;
+
+    parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
+
+    Ok(())
 }
 
 fn parse_kind(
@@ -357,9 +384,9 @@ pub fn parse_type_def(
     parser: &mut Parser<'_>,
     namespace_id: NamespaceId,
 ) -> Result<(), ParseError> {
-    parse_keyword(parser, Keyword::TypeDef, ParsingActivity::Constant)?;
+    parse_keyword(parser, Keyword::TypeDef, ParsingActivity::TypeDef)?;
 
-    let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
+    let identifier = parse_identifier(parser, ParsingActivity::TypeDef)?;
 
     parse_kind(
         parser,
@@ -376,9 +403,67 @@ pub fn parse_type_def(
         .manager
         .insert_named_type(namespace_id, identifier, type_def)?;
 
-    parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
+    parse_kind(parser, &TokenKind::Terminator, ParsingActivity::TypeDef)?;
 
     Ok(())
+}
+
+enum ListKind<V> {
+    Empty,
+    Named(Vec<(Identifier, V)>),
+    Unnamed(Vec<V>),
+}
+
+fn parse_named_or_unnamed_list<V>(
+    parser: &mut Parser,
+    grammar: ListGrammar,
+    mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
+    activity: ParsingActivity,
+) -> Result<(SourcePos, ListKind<V>), ParseError> {
+    let start = match parser.peek_token(0)? {
+        Some(Token { kind, start, .. }) if kind == grammar.start => start,
+        _ => {
+            return Err(UnexpectedTokenError {
+                file: parser.file,
+                activity,
+                expected: vec![ExpectedValue::Kind(grammar.start)],
+                got: parser.peek_token(0)?.into(),
+            }
+            .into())
+        }
+    };
+
+    // Determine wether it is named or not
+    if let Some(Token {
+        kind: TokenKind::Terminator,
+        ..
+    }) = parser.peek_token(1)?
+    {
+        parser.eat_token()?;
+        let terminator = parser.eat_token()?.unwrap();
+        Ok((
+            SourcePos {
+                file: parser.file,
+                start,
+                end: terminator.end,
+            },
+            ListKind::Empty,
+        ))
+    } else if let Some(Token {
+        kind:
+            TokenKind::Operator {
+                kind: OpKind::Declaration,
+                is_assignment: false,
+            },
+        ..
+    }) = parser.peek_token(2)?
+    {
+        parse_named_list(parser, grammar, parse_value, activity)
+            .map(|(pos, list)| (pos, ListKind::Named(list)))
+    } else {
+        parse_list(parser, grammar, parse_value, activity)
+            .map(|(pos, list)| (pos, ListKind::Unnamed(list)))
+    }
 }
 
 /// Parses a named list.

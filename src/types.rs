@@ -16,11 +16,14 @@ pub struct TypeDef {
 impl TypeDef {
     pub fn get_unsized_dependencies<E>(
         &self,
-        mut on_find_dependency: &mut impl FnMut(TinyString) -> Result<(), E>,
+        mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
     ) -> Result<(), E> {
         use TypeDefKind::*;
         match &self.kind {
-            Offload(name) => on_find_dependency(*name)?,
+            Offload(name) => on_find_dependency(Identifier {
+                data: *name,
+                pos: self.pos.clone(),
+            })?,
             Tuple(members) => {
                 for member in members {
                     member.get_unsized_dependencies(on_find_dependency)?;

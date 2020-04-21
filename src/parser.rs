@@ -41,6 +41,8 @@ pub enum ParsingActivity {
     LoadNamespace,
     TypeDef,
     Expression,
+    Block,
+    Let,
 }
 
 impl Display for ParsingActivity {
@@ -59,6 +61,8 @@ impl Display for ParsingActivity {
             LoadNamespace => write!(f, "external namespace load"),
             Expression => write!(f, "expression"),
             TypeDef => write!(f, "type definition"),
+            Block => write!(f, "block"),
+            Let => write!(f, "let"),
         }
     }
 }
@@ -270,15 +274,19 @@ pub fn parse_namespace(
     }
 }
 
-fn parse_expression(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError> {
-    parse_expression_rec(parser, 0)
+fn parse_expression(
+    parser: &mut Parser<'_>,
+    id: NamespaceId,
+) -> Result<ast::ExpressionDef, ParseError> {
+    parse_expression_rec(parser, 0, id)
 }
 
 fn parse_expression_rec(
     parser: &mut Parser<'_>,
     priority: u8,
+    id: NamespaceId,
 ) -> Result<ast::ExpressionDef, ParseError> {
-    let mut expression = Some(parse_value(parser)?);
+    let mut expression = Some(parse_value(parser, id)?);
 
     loop {
         match parser.peek_token(0)? {
@@ -297,7 +305,7 @@ fn parse_expression_rec(
                     parser.eat_token()?;
 
                     let left = expression.take().unwrap();
-                    let right = parse_expression_rec(parser, op_priority)?;
+                    let right = parse_expression_rec(parser, op_priority, id)?;
 
                     expression = Some(ast::ExpressionDef {
                         kind: ast::ExpressionDefKind::Operator(kind, vec![left, right]),
@@ -316,44 +324,120 @@ fn parse_expression_rec(
     }
 }
 
-fn parse_value(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError> {
-    match parser.eat_token()? {
+fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::ExpressionDef, ParseError> {
+    match parser.peek_token(0)? {
+        Some(Token {
+            kind: TokenKind::OpeningBracket(BracketKind::Paren),
+            start,
+            end,
+        }) => {
+            let sub_namespace_id = parser
+                .manager
+                .namespace_manager
+                .create_anonymous_namespace(id);
+
+            let (statements, expression) = parse_block(parser, sub_namespace_id)?;
+
+            let expression = match expression {
+                Some(expression) => expression,
+                None => panic!("TODO: Cannot have a non expression code block in a value"),
+            };
+
+            if statements.len() == 0 {
+                Ok(expression)
+            } else {
+                Ok(ast::ExpressionDef {
+                    pos: SourcePos {
+                        file: parser.file,
+                        start,
+                        end,
+                    },
+                    kind: ast::ExpressionDefKind::Block(statements, Box::new(expression)),
+                })
+            }
+        }
+        Some(Token {
+            kind:
+                TokenKind::Operator {
+                    kind,
+                    is_assignment: false,
+                },
+            start,
+            end,
+        }) => {
+            parser.eat_token()?;
+            let arg = parse_value(parser, id)?;
+            Ok(ast::ExpressionDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start,
+                    end,
+                },
+                kind: ast::ExpressionDefKind::UnaryOperator(kind, Box::new(arg)),
+            })
+        }
         Some(Token {
             kind: TokenKind::IntLiteral(value),
             start,
             end,
-        }) => Ok(ast::ExpressionDef {
-            pos: SourcePos {
-                file: parser.file,
-                start: start,
-                end: end,
-            },
-            kind: ast::ExpressionDefKind::IntLiteral(value),
-        }),
+        }) => {
+            parser.eat_token()?;
+            Ok(ast::ExpressionDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start: start,
+                    end: end,
+                },
+                kind: ast::ExpressionDefKind::IntLiteral(value),
+            })
+        }
         Some(Token {
             kind: TokenKind::FloatLiteral(value),
             start,
             end,
-        }) => Ok(ast::ExpressionDef {
-            pos: SourcePos {
-                file: parser.file,
-                start: start,
-                end: end,
-            },
-            kind: ast::ExpressionDefKind::FloatLiteral(value),
-        }),
+        }) => {
+            parser.eat_token()?;
+            Ok(ast::ExpressionDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start: start,
+                    end: end,
+                },
+                kind: ast::ExpressionDefKind::FloatLiteral(value),
+            })
+        }
         Some(Token {
             kind: TokenKind::StringLiteral(value),
             start,
             end,
-        }) => Ok(ast::ExpressionDef {
-            pos: SourcePos {
-                file: parser.file,
-                start: start,
-                end: end,
-            },
-            kind: ast::ExpressionDefKind::StringLiteral(value),
-        }),
+        }) => {
+            parser.eat_token()?;
+            Ok(ast::ExpressionDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start: start,
+                    end: end,
+                },
+                kind: ast::ExpressionDefKind::StringLiteral(value),
+            })
+        }
+        Some(Token {
+            kind: TokenKind::Identifier(name),
+            start,
+            end,
+        }) => {
+            parser.eat_token()?;
+            Ok(ast::ExpressionDef {
+                pos: SourcePos {
+                    file: parser.file,
+                    start: start,
+                    end: end,
+                },
+                kind: ast::ExpressionDefKind::Offload(name),
+            })
+
+            // TODO: Check if this is a function call
+        }
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Expression,
@@ -364,6 +448,134 @@ fn parse_value(parser: &mut Parser<'_>) -> Result<ast::ExpressionDef, ParseError
     }
 }
 
+fn parse_block(
+    parser: &mut Parser<'_>,
+    id: NamespaceId,
+) -> Result<(Vec<ast::StatementDef>, Option<ast::ExpressionDef>), ParseError> {
+    parse_kind(
+        parser,
+        &TokenKind::OpeningBracket(BracketKind::Paren),
+        ParsingActivity::Block,
+    )?;
+
+    let mut statements = Vec::new();
+    while let Some(token) = parser.peek_token(0)? {
+        match token {
+            Token {
+                kind: TokenKind::ClosingBracket(BracketKind::Paren),
+                ..
+            } => {
+                parser.eat_token()?;
+                return Ok((statements, None));
+            }
+            Token {
+                kind: TokenKind::OpeningBracket(BracketKind::Paren),
+                start,
+                end,
+            } => {
+                let anonymous = parser
+                    .manager
+                    .namespace_manager
+                    .create_anonymous_namespace(id);
+
+                let (block_statements, expression) = parse_block(parser, anonymous)?;
+
+                if let Some(expression) = expression {
+                    parse_kind(
+                        parser,
+                        &TokenKind::ClosingBracket(BracketKind::Paren),
+                        ParsingActivity::Block,
+                    )?;
+
+                    return Ok((
+                        statements,
+                        Some(ast::ExpressionDef {
+                            pos: SourcePos {
+                                file: parser.file,
+                                start,
+                                end,
+                            },
+                            kind: ast::ExpressionDefKind::Block(
+                                block_statements,
+                                Box::new(expression),
+                            ),
+                        }),
+                    ));
+                } else {
+                    statements.push(ast::StatementDef::Block(block_statements));
+                }
+            }
+            Token {
+                kind: TokenKind::Keyword(Keyword::Let),
+                start,
+                end,
+            } => {
+                parser.eat_token()?;
+
+                let name = parse_identifier(parser, ParsingActivity::Let)?;
+
+                let operator = match parser.eat_token()? {
+                    Some(Token {
+                        kind:
+                            TokenKind::Operator {
+                                kind,
+                                is_assignment: true,
+                            },
+                        ..
+                    }) => kind,
+                    _ => panic!("TODO: Expected an assignment operator"),
+                };
+
+                let expr = parse_expression(parser, id)?;
+
+                parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Let)?;
+
+                statements.push(ast::StatementDef::Assignment(name, operator, expr));
+            }
+            Token {
+                kind: TokenKind::Keyword(Keyword::TypeDef),
+                ..
+            } => {
+                parse_type_def(parser, id)?;
+            }
+            Token {
+                kind: TokenKind::Keyword(Keyword::Const),
+                ..
+            } => {
+                parse_constant_def(parser, id)?;
+            }
+            // The last resort is to parse an expression
+            _ => {
+                let expression = parse_expression(parser, id)?;
+
+                match parser.eat_token()? {
+                    Some(Token {
+                        kind: TokenKind::ClosingBracket(BracketKind::Paren),
+                        ..
+                    }) => {
+                        return Ok((statements, Some(expression)));
+                    }
+                    Some(Token {
+                        kind: TokenKind::Terminator,
+                        ..
+                    }) => {
+                        statements.push(ast::StatementDef::Expression(expression));
+                    }
+                    _ => panic!("TODO: Invalid token after expression in block"),
+                }
+            }
+        }
+    }
+
+    Err(UnexpectedTokenError {
+        file: parser.file,
+        activity: ParsingActivity::Block,
+        expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
+        got: GotAsToken::None,
+    }
+    .into())
+}
+
 fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), ParseError> {
     parse_keyword(parser, Keyword::Const, ParsingActivity::Constant)?;
 
@@ -372,14 +584,15 @@ fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), Pa
     parse_kind(
         parser,
         &TokenKind::Operator {
-            kind: OpKind::Assignment,
-            is_assignment: false,
+            kind: OpKind::NoOp,
+            is_assignment: true,
         },
         ParsingActivity::Constant,
     )?;
 
-    let expression = parse_expression(parser)?;
-    println!("{:?}", expression);
+    let expression = parse_expression(parser, id)?;
+    expression.pretty_print(0);
+    println!("");
 
     parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
 
@@ -491,8 +704,8 @@ pub fn parse_type_def(
     parse_kind(
         parser,
         &TokenKind::Operator {
-            kind: OpKind::Assignment,
-            is_assignment: false,
+            kind: OpKind::NoOp,
+            is_assignment: true,
         },
         ParsingActivity::TypeDef,
     )?;

@@ -519,7 +519,6 @@ impl Lexer<'_> {
                     ("&&", OpKind::And),
                     ("||", OpKind::Or),
                     ("!", OpKind::Not),
-                    ("=", OpKind::Assignment),
                     ("::", OpKind::Constant),
                 ];
 
@@ -536,6 +535,18 @@ impl Lexer<'_> {
                     (":", OpKind::Declaration),
                     ("@", OpKind::Dereference),
                 ];
+
+                if self.is_this_next("=") {
+                    self.next_char();
+                    return Ok(ReadTokenState::Token(Token {
+                        kind: TokenKind::Operator {
+                            kind: OpKind::NoOp,
+                            is_assignment: true,
+                        },
+                        start,
+                        end: self.current_pos,
+                    }));
+                }
 
                 if let Some(op) = self.match_next(NON_ASSIGN_OP_MAP.iter()) {
                     Ok(ReadTokenState::Token(Token {
@@ -629,6 +640,7 @@ impl Lexer<'_> {
                         "extern" => TokenKind::Keyword(Keyword::Extern),
                         "use" => TokenKind::Keyword(Keyword::Use),
                         "module" => TokenKind::Keyword(Keyword::Module),
+                        "let" => TokenKind::Keyword(Keyword::Let),
                         "type" => TokenKind::Keyword(Keyword::TypeDef),
                         "const" => TokenKind::Keyword(Keyword::Const),
                         "alias" => TokenKind::Keyword(Keyword::Alias),

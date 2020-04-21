@@ -46,4 +46,35 @@ impl OpKind {
 
         NonZeroU8::new(priority).unwrap()
     }
+
+    pub fn glyph(&self) -> &'static str {
+        use OpKind::*;
+        match self {
+            NoOp => "",
+            Assignment => unreachable!(),
+            Declaration => unreachable!(),
+            Constant => unreachable!(),
+            ReturnArrow => unreachable!(),
+            Dereference => "@",
+            Access => unreachable!(),
+            Add => "+",
+            Sub => "-",
+            Mul => "*",
+            Div => "/",
+            Mod => "%",
+            Pow => "^",
+            Equal => "==",
+            NotEqual => "!=",
+            And => "&&",
+            Or => "||",
+            Not => "!",
+            Less => "<",
+            Greater => ">",
+            LessEq => "<=",
+            GreaterEq => ">=",
+            BitAnd => "&",
+            BitOr => "|",
+            BitNot => "~",
+        }
+    }
 }

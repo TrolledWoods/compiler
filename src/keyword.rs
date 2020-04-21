@@ -15,6 +15,7 @@ pub enum Keyword {
 
     // Namespaces
     Use,
+    Let,
     Module,
     Const,
     TypeDef,

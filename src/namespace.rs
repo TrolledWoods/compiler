@@ -157,6 +157,10 @@ impl NamespaceManager {
         NamespaceId::new(1)
     }
 
+    pub fn create_anonymous_namespace(&self, parent: NamespaceId) -> NamespaceId {
+        parent
+    }
+
     pub fn insert_namespace(
         &self,
         _parent: NamespaceId,

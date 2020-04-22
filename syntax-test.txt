@@ -44,12 +44,6 @@ const HI2 = (
 
     { };
 	{ 3.0, "hello", "hi" };
-	[ "Yes", "Epic", "Stuff" ];
-	{ x: 30.0, y: "cool", 
-		z: 50.0 + (
-			34 + 231 * 23 * 21414 ^ 2
-		) + 20,
-	} * 50;
 
     let x = (
 		type Pos = { x: f32, y: f32, width: f32, height: f32 };

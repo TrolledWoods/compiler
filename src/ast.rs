@@ -46,6 +46,18 @@ impl ExpressionDef {
                     type_def.get_unsized_dependencies(on_find_dep)?;
                 }
             }
+            Collection(kind) => match kind {
+                CollectionDefKind::Named(members) => {
+                    for (_, member) in members {
+                        member.get_dependencies(on_find_dep)?;
+                    }
+                }
+                CollectionDefKind::Unnamed(members) => {
+                    for member in members {
+                        member.get_dependencies(on_find_dep)?;
+                    }
+                }
+            },
             Offload(name) => {
                 on_find_dep(Identifier {
                     data: *name,
@@ -61,6 +73,12 @@ impl ExpressionDef {
 }
 
 #[derive(Debug)]
+pub enum CollectionDefKind {
+    Named(Vec<(Identifier, ExpressionDef)>),
+    Unnamed(Vec<ExpressionDef>),
+}
+
+#[derive(Debug)]
 pub enum ExpressionDefKind {
     Operator(OpKind, Vec<ExpressionDef>),
     UnaryOperator(OpKind, Box<ExpressionDef>),
@@ -70,6 +88,7 @@ pub enum ExpressionDefKind {
     },
     Function(Vec<(Identifier, TypeDef)>, Vec<TypeDef>),
     Offload(TinyString),
+    Collection(CollectionDefKind),
 
     StringLiteral(TinyString),
     IntLiteral(i128),
@@ -95,6 +114,29 @@ impl ExpressionDefKind {
                 arg.pretty_print(indent);
             }
             Offload(name) => print!("{}", name),
+            Collection(kind) => match kind {
+                CollectionDefKind::Named(members) => {
+                    println!("{}", '{');
+                    for (name, member) in members {
+                        print_indent(indent + 1);
+                        print!("{}: ", name.data);
+                        member.pretty_print(indent + 1);
+                        println!(",");
+                    }
+                    print_indent(indent);
+                    print!("{}", '}');
+                }
+                CollectionDefKind::Unnamed(members) => {
+                    println!("{}", '{');
+                    for member in members {
+                        print_indent(indent + 1);
+                        member.pretty_print(indent + 1);
+                        println!(",");
+                    }
+                    print_indent(indent);
+                    print!("{}", '}');
+                }
+            },
             StringLiteral(content) => print!("\"{}\"", content),
             IntLiteral(content) => print!("{}", content),
             FloatLiteral(content) => print!("{}", content),

@@ -357,6 +357,62 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
             }
         }
         Some(Token {
+            kind: TokenKind::OpeningBracket(BracketKind::Curly),
+            start,
+            end,
+        }) => {
+            // Either a function, a struct, a tuple or a nil
+            let (list_pos, list) = parse_named_or_unnamed_list(
+                parser,
+                ListGrammar::curly(),
+                |parser| parse_expression(parser, id),
+                ParsingActivity::Block,
+            )?;
+
+            // Try parsing a function definition
+            if try_parse_kind(
+                parser,
+                &TokenKind::Operator {
+                    kind: OpKind::ReturnArrow,
+                    is_assignment: false,
+                },
+            )?
+            .is_some()
+            {
+                let args = match list {
+                    ListKind::Empty => vec![],
+                    ListKind::Named(members) => members,
+                    ListKind::Unnamed(_) => {
+                        panic!("TODO: Cannot create a function with no argument names")
+                    }
+                };
+
+                unimplemented!();
+            } else {
+                // It wasn't a function
+                match list {
+                    ListKind::Empty => Ok(ast::ExpressionDef {
+                        pos: list_pos,
+                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
+                            vec![],
+                        )),
+                    }),
+                    ListKind::Named(members) => Ok(ast::ExpressionDef {
+                        pos: list_pos,
+                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Named(
+                            members,
+                        )),
+                    }),
+                    ListKind::Unnamed(members) => Ok(ast::ExpressionDef {
+                        pos: list_pos,
+                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
+                            members,
+                        )),
+                    }),
+                }
+            }
+        }
+        Some(Token {
             kind:
                 TokenKind::Operator {
                     kind,

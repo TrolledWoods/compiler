@@ -194,7 +194,16 @@ impl ExpressionDefKind {
                 print!("] ");
                 body.pretty_print(indent);
             }
-            _ => unimplemented!(),
+            FunctionCall { function, args } => {
+                function.pretty_print(indent);
+
+                print!(" [");
+                for member in args {
+                    member.pretty_print(indent);
+                    print!(", ");
+                }
+                print!("]");
+            }
         }
     }
 }
@@ -202,6 +211,7 @@ impl ExpressionDefKind {
 #[derive(Debug)]
 pub enum StatementDef {
     Declaration(Identifier, ExpressionDef),
+    Assignment(ExpressionDef, OpKind, ExpressionDef),
     Expression(ExpressionDef),
     Block(Vec<StatementDef>),
 }
@@ -213,6 +223,11 @@ impl StatementDef {
             Declaration(ident, expr) => {
                 print!("let {} = ", ident.data);
                 expr.pretty_print(indent);
+            }
+            Assignment(left, expr, right) => {
+                left.pretty_print(indent);
+                print!(" {}= ", expr.glyph());
+                right.pretty_print(indent);
             }
             Expression(expr) => expr.pretty_print(indent),
             Block(statements) => {

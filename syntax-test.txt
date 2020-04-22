@@ -1,5 +1,7 @@
 const main = [] -> [f32] (
     let x = x * 5 + 2 * 3;
+	x += 23;
+	add_1 [ x, y, z + 3 * 23 ];
     x
 );
 

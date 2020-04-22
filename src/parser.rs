@@ -325,6 +325,38 @@ fn parse_expression_rec(
 }
 
 fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::ExpressionDef, ParseError> {
+    let mut value = Some(parse_non_func_call_value(parser, id)?);
+
+    // Parse function calls
+    while let Some(Token {
+        kind: TokenKind::OpeningBracket(BracketKind::Brack),
+        ..
+    }) = parser.peek_token(0)?
+    {
+        let (args_pos, args) = parse_list(
+            parser,
+            ListGrammar::square(),
+            |parser| parse_expression(parser, id),
+            ParsingActivity::Expression,
+        )?;
+
+        let old_value = value.take().unwrap();
+        value = Some(ast::ExpressionDef {
+            kind: ast::ExpressionDefKind::FunctionCall {
+                function: Box::new(old_value),
+                args: args,
+            },
+            pos: args_pos,
+        });
+    }
+
+    Ok(value.unwrap())
+}
+
+fn parse_non_func_call_value(
+    parser: &mut Parser<'_>,
+    id: NamespaceId,
+) -> Result<ast::ExpressionDef, ParseError> {
     match parser.peek_token(0)? {
         Some(Token {
             kind: TokenKind::OpeningBracket(BracketKind::Paren),
@@ -557,6 +589,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
             end,
         }) => {
             parser.eat_token()?;
+
             Ok(ast::ExpressionDef {
                 pos: SourcePos {
                     file: parser.file,
@@ -565,8 +598,6 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
                 },
                 kind: ast::ExpressionDefKind::Offload(name),
             })
-
-            // TODO: Check if this is a function call
         }
         c => Err(UnexpectedTokenError {
             file: parser.file,
@@ -676,6 +707,21 @@ fn parse_block(
                 let expression = parse_expression(parser, id)?;
 
                 match parser.eat_token()? {
+                    Some(Token {
+                        kind:
+                            TokenKind::Operator {
+                                kind,
+                                is_assignment: true,
+                            },
+                        start,
+                        end,
+                    }) => {
+                        let right = parse_expression(parser, id)?;
+
+                        parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Block)?;
+
+                        statements.push(ast::StatementDef::Assignment(expression, kind, right));
+                    }
                     Some(Token {
                         kind: TokenKind::ClosingBracket(BracketKind::Paren),
                         ..

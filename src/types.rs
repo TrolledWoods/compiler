@@ -45,6 +45,9 @@ impl TypeDef {
 				}
 			}
 			Primitive(kind) => (),
+			StaticArray(_, content) => content.get_unsized_dependencies(on_find_dependency)?,
+			ArrayWindow(content) => content.get_unsized_dependencies(on_find_dependency)?,
+			DynamicArray(content) => content.get_unsized_dependencies(on_find_dependency)?,
 		}
 
 		Ok(())
@@ -70,6 +73,9 @@ impl TypeDef {
 				}
 			}
 			Primitive(kind) => (),
+			StaticArray(_, content) => content.get_dependencies(on_find_dependency)?,
+			ArrayWindow(_) => (),
+			DynamicArray(_) => (),
 		}
 
 		Ok(())
@@ -94,6 +100,9 @@ pub enum TypeDefKind {
 	FunctionPtr(FunctionHeader<TypeDef>),
 	Struct(Vec<(TinyString, TypeDef)>),
 	Primitive(PrimitiveKind),
+	StaticArray(usize, Box<TypeDef>),
+	ArrayWindow(Box<TypeDef>),
+	DynamicArray(Box<TypeDef>),
 }
 
 impl Debug for TypeDefKind {
@@ -138,6 +147,9 @@ impl Display for TypeDefKind {
 				}
 				write!(f, ")")?;
 			}
+			StaticArray(count, content) => write!(f, "[{}] {}", count, content)?,
+			ArrayWindow(content) => write!(f, "[-] {}", content)?,
+			DynamicArray(content) => write!(f, "[?] {}", content)?,
 		}
 
 		Ok(())
@@ -152,6 +164,9 @@ pub enum ResolvedTypeKind {
 	FunctionPtr,
 	Struct(Vec<(usize, TinyString, ResolvedTypeId)>),
 	Primitive(PrimitiveKind),
+	StaticArray(usize, ResolvedTypeId),
+	ArrayWindow,
+	DynamicArray,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -300,29 +315,57 @@ pub fn size_type_def(
 
 			Ok((*size, *align, id))
 		}
-		TypeDefKind::Pointer(_) => {
+		TypeDefKind::Pointer(_)
+		| TypeDefKind::FunctionPtr(_)
+		| TypeDefKind::ArrayWindow(_)
+		| TypeDefKind::DynamicArray(_) => {
 			let id = insert_resolved_type(
 				manager,
 				ResolvedTypeDef {
 					size: 8,
 					align: 8,
-					kind: ResolvedTypeKind::Pointer,
+					kind: match &type_def.kind {
+						TypeDefKind::Pointer(_) => ResolvedTypeKind::Pointer,
+						TypeDefKind::FunctionPtr(_) => ResolvedTypeKind::FunctionPtr,
+						TypeDefKind::ArrayWindow(_) => ResolvedTypeKind::ArrayWindow,
+						TypeDefKind::DynamicArray(_) => ResolvedTypeKind::DynamicArray,
+						_ => unreachable!(),
+					},
 				},
 			);
 
 			Ok((8, 8, id))
 		}
-		TypeDefKind::FunctionPtr(_) => {
+		TypeDefKind::StaticArray(count, contents) => {
+			let (content_size, content_align, content_id) =
+				size_type_def(manager, namespace_id, contents, recursion_guard)?;
+
+			let (size, align) = {
+				if content_size == 0 {
+					(0, 0)
+				} else {
+					// It shouldn't be zero when the size isn't zero, right?
+					assert_ne!(content_align, 0);
+					let mut size = content_size;
+
+					while size % content_align != 0 {
+						size += 1;
+					}
+
+					(size * count, content_align)
+				}
+			};
+
 			let id = insert_resolved_type(
 				manager,
 				ResolvedTypeDef {
-					size: 8,
-					align: 8,
-					kind: ResolvedTypeKind::FunctionPtr,
+					size,
+					align,
+					kind: ResolvedTypeKind::StaticArray(*count, content_id),
 				},
 			);
 
-			Ok((8, 8, id))
+			Ok((size, align, id))
 		}
 		TypeDefKind::Tuple(members) => {
 			let mut resolved_members = Vec::with_capacity(members.len());

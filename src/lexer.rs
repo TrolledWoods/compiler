@@ -19,6 +19,8 @@ pub enum TokenKind {
 	Separator,
 	ReturnArrow,
 	Declaration,
+	ArrayWindow,
+	DynamicArray,
 	Identifier(TinyString),
 	Operator(&'static str),
 	AssignmentOperator(&'static str),
@@ -408,6 +410,30 @@ impl Lexer<'_> {
 					kind: TokenKind::OpeningBracket(BracketKind::Paren),
 					start,
 					end: start,
+				}))
+			}
+			Some(c) if self.is_this_next("[-]") => {
+				let start = self.current_pos;
+				self.next_char();
+				self.next_char();
+				self.next_char();
+
+				Ok(ReadTokenState::Token(Token {
+					kind: TokenKind::ArrayWindow,
+					start,
+					end: self.current_pos,
+				}))
+			}
+			Some(c) if self.is_this_next("[?]") => {
+				let start = self.current_pos;
+				self.next_char();
+				self.next_char();
+				self.next_char();
+
+				Ok(ReadTokenState::Token(Token {
+					kind: TokenKind::DynamicArray,
+					start,
+					end: self.current_pos,
 				}))
 			}
 			Some('[') => {

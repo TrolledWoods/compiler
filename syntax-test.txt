@@ -1,23 +1,15 @@
-const main = [x: *f32] -> [f32] (
-	*x *= 2;
+type Vec3 = [3] {f32, u8};
 
-	let x = (
-50 * ( (20 + 50) + 19)
-	);
+const main = [x: [[?] f32, f32] -> []] -> [f32] (
+	let x: [?] f32 = { 
+		length: 0,
+		capacity: 500,
+		buffer: alloc[size_of[f32] * 500],
+	};
 
-	{ 30.0 };
-	[ x: f32 ] (
-		println[x];
-
-		[ hi ]
-	);
-
-	(
-		let y = 32;
-	);
-
-	(
-		let z = 50;
+	let x = 50;
+	let y = [pos: *[3] f32] -> [] (
+		
 	);
 );
 

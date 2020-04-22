@@ -52,7 +52,7 @@ const ALSO_PI = cast<f32> { 3.1415 };
 
 // This is a function.
 // The type parameter for this would be "() -> ()"
-const main = () {
+const main = [] {
     // "let" is only allowed inside functions.
 	// It creates a value on the stack.
 	// Not sure about how struct definitions should look

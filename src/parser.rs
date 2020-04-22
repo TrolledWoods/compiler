@@ -7,6 +7,7 @@ use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator;
 use crate::string_pile::TinyString;
 use crate::types::{CollectionDefKind, FunctionHeader, PrimitiveKind, TypeDef, TypeDefKind};
+use std::convert::TryInto;
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
@@ -1152,51 +1153,126 @@ fn parse_collection(parser: &mut Parser) -> Result<(SourcePos, CollectionDefKind
 fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 	match parser.peek_token(0)? {
 		Some(Token {
+			kind: TokenKind::ArrayWindow,
+			start,
+			end,
+		}) => {
+			// This is an array window
+			parser.eat_token()?;
+			let sub_type = parse_type(parser)?;
+
+			Ok(TypeDef {
+				pos: SourcePos {
+					file: parser.file,
+					start,
+					end,
+				},
+				kind: TypeDefKind::ArrayWindow(Box::new(sub_type)),
+			})
+		}
+		Some(Token {
+			kind: TokenKind::DynamicArray,
+			start,
+			end,
+		}) => {
+			// This is a dynamic array!
+			parser.eat_token()?;
+			let sub_type = parse_type(parser)?;
+
+			Ok(TypeDef {
+				pos: SourcePos {
+					file: parser.file,
+					start,
+					end,
+				},
+				kind: TypeDefKind::DynamicArray(Box::new(sub_type)),
+			})
+		}
+		Some(Token {
+			kind: TokenKind::OpeningBracket(BracketKind::Brack),
+			start,
+			..
+		}) => {
+			match parser.peek_token(1)? {
+				Some(Token {
+					kind: TokenKind::IntLiteral(count),
+					end,
+					..
+				}) => {
+					// This is a statically sized array
+					parser.eat_token()?;
+					parser.eat_token()?;
+
+					parse_kind(
+						parser,
+						&TokenKind::ClosingBracket(BracketKind::Brack),
+						ParsingActivity::Type,
+					)?;
+
+					let count: usize = match count.try_into() {
+						Ok(v) if v > 0 => v,
+						Err(_) | Ok(_) => panic!("TODO: Invalid array size number"),
+					};
+
+					let sub_type = parse_type(parser)?;
+
+					Ok(TypeDef {
+						pos: SourcePos {
+							file: parser.file,
+							start,
+							end,
+						},
+						kind: TypeDefKind::StaticArray(count, Box::new(sub_type)),
+					})
+				}
+				_ => {
+					// This is a function(because it's not an array)
+					let (pos, args) = parse_list(
+						parser,
+						ListGrammar::square(),
+						|parser| parse_type(parser),
+						ParsingActivity::FunctionPtr,
+					)?;
+
+					parse_kind(
+						parser,
+						&TokenKind::ReturnArrow,
+						ParsingActivity::FunctionPtr,
+					)?;
+
+					let (return_pos, returns) = parse_list(
+						parser,
+						ListGrammar::square(),
+						|parser| parse_type(parser),
+						ParsingActivity::FunctionPtr,
+					)?;
+
+					Ok(TypeDef {
+						pos: SourcePos {
+							file: parser.file,
+							start: pos.start,
+							end: return_pos.end,
+						},
+						kind: TypeDefKind::FunctionPtr(FunctionHeader { args, returns }),
+					})
+				}
+			}
+		}
+		Some(Token {
 			kind: TokenKind::OpeningBracket(BracketKind::Curly),
 			..
 		}) => {
 			let (pos, collection) = parse_collection(parser)?;
 
-			if let Some(_) = try_parse_kind(parser, &TokenKind::ReturnArrow)? {
-				// This is a function pointer!
-				let args = match collection {
-					CollectionDefKind::Unnamed(members) => members,
-					_ => {
-						panic!(
-                            "TODO: Cannot have a Named collection as the argument type for a function");
-					}
-				};
-
-				let (return_pos, returns) = parse_collection(parser)?;
-
-				let returns = match returns {
-					CollectionDefKind::Unnamed(members) => members,
-					_ => {
-						panic!(
-                            "TODO: Cannot have a Named collection as the return type for a function");
-					}
-				};
-
-				Ok(TypeDef {
-					pos: SourcePos {
-						file: parser.file,
-						start: pos.start,
-						end: return_pos.end,
-					},
-					kind: TypeDefKind::FunctionPtr(FunctionHeader { args, returns }),
-				})
-			} else {
-				// Just a collection
-				match collection {
-					CollectionDefKind::Unnamed(members) => Ok(TypeDef {
-						pos,
-						kind: TypeDefKind::Tuple(members),
-					}),
-					CollectionDefKind::Named(members) => Ok(TypeDef {
-						pos,
-						kind: TypeDefKind::Struct(members),
-					}),
-				}
+			match collection {
+				CollectionDefKind::Unnamed(members) => Ok(TypeDef {
+					pos,
+					kind: TypeDefKind::Tuple(members),
+				}),
+				CollectionDefKind::Named(members) => Ok(TypeDef {
+					pos,
+					kind: TypeDefKind::Struct(members),
+				}),
 			}
 		}
 		Some(Token {

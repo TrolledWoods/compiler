@@ -31,66 +31,63 @@ mod types;
 pub const SRC_EXTENSION: &str = "gai";
 
 fn main() {
-    let mut args = std::env::args();
+	let mut args = std::env::args();
 
-    args.next();
+	args.next();
 
-    let src_file_path = match args.next() {
-        Some(value) => PathBuf::from(value),
-        None => {
-            println!("Please give the path to the file you want to compile");
-            return;
-        }
-    };
+	let src_file_path = match args.next() {
+		Some(value) => PathBuf::from(value),
+		None => PathBuf::from("syntax-test.txt"),
+	};
 
-    assert_eq!(args.next(), None, "Too many console arguments passed!");
+	assert_eq!(args.next(), None, "Too many console arguments passed!");
 
-    let manager = Arc::new(compilation_manager::CompileManager::new());
+	let manager = Arc::new(compilation_manager::CompileManager::new());
 
-    // Parsing step
-    let root = manager.namespace_manager.insert_root();
+	// Parsing step
+	let root = manager.namespace_manager.insert_root();
 
-    let mut errors = Vec::new();
-    if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), root) {
-        errors.push(err);
-    }
+	let mut errors = Vec::new();
+	if let Err(err) = parser::parse_file(&src_file_path, manager.clone(), root) {
+		errors.push(err);
+	}
 
-    if errors.len() > 0 {
-        use crate::error::CompileError;
+	if errors.len() > 0 {
+		use crate::error::CompileError;
 
-        println!("There were errors while parsing!\n");
+		println!("There were errors while parsing!\n");
 
-        for error in errors {
-            error.get_printing_data().print();
-        }
+		for error in errors {
+			error.get_printing_data().print();
+		}
 
-        return;
-    }
+		return;
+	}
 
-    let manager = match Arc::try_unwrap(manager) {
-        Ok(value) => value,
-        Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
-    };
+	let manager = match Arc::try_unwrap(manager) {
+		Ok(value) => value,
+		Err(_) => panic!("Some thread is still alive and keeps an Arc to the compilation manager"),
+	};
 
-    let mut compilation_errors = Vec::new();
-    while let Some(id) = manager.get_ready_compilation_unit() {
-        match manager.advance_compilation_unit(id) {
-            Ok(()) => (),
-            Err(error) => compilation_errors.push(error),
-        }
-    }
+	let mut compilation_errors = Vec::new();
+	while let Some(id) = manager.get_ready_compilation_unit() {
+		match manager.advance_compilation_unit(id) {
+			Ok(()) => (),
+			Err(error) => compilation_errors.push(error),
+		}
+	}
 
-    if compilation_errors.len() > 0 {
-        use crate::error::CompileError;
+	if compilation_errors.len() > 0 {
+		use crate::error::CompileError;
 
-        println!("There were errors while compiling!\n");
+		println!("There were errors while compiling!\n");
 
-        for error in compilation_errors {
-            error.get_printing_data().print();
-        }
+		for error in compilation_errors {
+			error.get_printing_data().print();
+		}
 
-        return;
-    }
+		return;
+	}
 
-    println!("Built succesfully! :D");
+	println!("Built succesfully! :D");
 }

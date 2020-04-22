@@ -1,15 +1,7 @@
-const main = [] -> [f32] (
-    let x = x * 5 + 2 * 3;
-	x += 23;
-	add_1 [ x, y, z + 3 * 23 ];
+const main = [x: f32] -> [f32] (
     x
 );
 
-// We need parenthesees here, so that we can
-// see it's a function and not an array. I may
-// change this later, though, so that "[num: *f32] *num;" is all you need
-const add_1 = [num: *f32] ( *num );
 
-// In this case it knows it's a function,
-// so you don't need the parenthesees :^)
-const add_2 = [num: *f32] -> [] *num;
+
+

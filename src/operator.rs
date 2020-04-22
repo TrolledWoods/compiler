@@ -1,80 +1,19 @@
 use std::num::NonZeroU8;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum OpKind {
-    NoOp,
-    Assignment,
-    Declaration,
-    Constant,
-    ReturnArrow,
-    Dereference,
-    Access,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Pow,
-    Equal,
-    NotEqual,
-    And,
-    Or,
-    Not,
-    Less,
-    Greater,
-    LessEq,
-    GreaterEq,
-    BitAnd,
-    BitOr,
-    BitNot,
-}
+pub fn priority(op: &str) -> NonZeroU8 {
+	let num = match op {
+		"*" | "/" | "%" => 1,
+		"+" | "-" => 2,
+		"<<" | ">>" => 3,
+		"<=" | ">=" | "<" | ">" => 4,
+		"==" | "!=" => 5,
+		"&" => 6,
+		"^" => 7,
+		"|" => 8,
+		"&&" => 9,
+		"||" => 10,
+		_ => unreachable!("Invalid operator {}!", op),
+	};
 
-impl OpKind {
-    /// Greater number means greater priority.
-    pub fn priority(&self) -> NonZeroU8 {
-        use OpKind::*;
-        // TODO: Make sure that these
-        // orders make sense
-        let priority = match self {
-            And | Or | Not => 1,
-            Equal | NotEqual | Greater | Less | GreaterEq | LessEq => 2,
-            Add | Sub => 3,
-            Mul | Div | Mod => 4,
-            Pow | BitAnd | BitOr | BitNot => 5,
-            _ => unimplemented!(),
-        };
-
-        NonZeroU8::new(priority).unwrap()
-    }
-
-    pub fn glyph(&self) -> &'static str {
-        use OpKind::*;
-        match self {
-            NoOp => "",
-            Assignment => unreachable!(),
-            Declaration => unreachable!(),
-            Constant => unreachable!(),
-            ReturnArrow => unreachable!(),
-            Dereference => "@",
-            Access => unreachable!(),
-            Add => "+",
-            Sub => "-",
-            Mul => "*",
-            Div => "/",
-            Mod => "%",
-            Pow => "^",
-            Equal => "==",
-            NotEqual => "!=",
-            And => "&&",
-            Or => "||",
-            Not => "!",
-            Less => "<",
-            Greater => ">",
-            LessEq => "<=",
-            GreaterEq => ">=",
-            BitAnd => "&",
-            BitOr => "|",
-            BitNot => "~",
-        }
-    }
+	NonZeroU8::new(num).unwrap()
 }

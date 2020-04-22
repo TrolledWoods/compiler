@@ -38,12 +38,18 @@ impl ExpressionDef {
                     arg.get_dependencies(on_find_dep)?;
                 }
             }
-            Function(args, returns) => {
+            Function(args, returns, body) => {
                 for (_, type_def) in args {
                     type_def.get_unsized_dependencies(on_find_dep)?;
                 }
                 for type_def in returns {
                     type_def.get_unsized_dependencies(on_find_dep)?;
+                }
+                body.get_dependencies(on_find_dep)?;
+            }
+            Array(members) => {
+                for member in members {
+                    member.get_dependencies(on_find_dep)?;
                 }
             }
             Collection(kind) => match kind {
@@ -86,8 +92,9 @@ pub enum ExpressionDefKind {
         function: Box<ExpressionDef>,
         args: Vec<ExpressionDef>,
     },
-    Function(Vec<(Identifier, TypeDef)>, Vec<TypeDef>),
+    Function(Vec<(Identifier, TypeDef)>, Vec<TypeDef>, Box<ExpressionDef>),
     Offload(TinyString),
+    Array(Vec<ExpressionDef>),
     Collection(CollectionDefKind),
 
     StringLiteral(TinyString),
@@ -114,6 +121,14 @@ impl ExpressionDefKind {
                 arg.pretty_print(indent);
             }
             Offload(name) => print!("{}", name),
+            Array(members) => {
+                print!("[");
+                for member in members {
+                    member.pretty_print(indent);
+                    print!(", ");
+                }
+                print!("]");
+            }
             Collection(kind) => match kind {
                 CollectionDefKind::Named(members) => {
                     println!("{}", '{');
@@ -160,6 +175,24 @@ impl ExpressionDefKind {
                     expression.pretty_print(indent);
                     print!(")");
                 }
+            }
+            Function(args, returns, body) => {
+                print!("[");
+                for (i, (name, member)) in args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{}: {}", name.data, member);
+                }
+                print!("] -> [");
+                for (i, member) in returns.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{}", member);
+                }
+                print!("] ");
+                body.pretty_print(indent);
             }
             _ => unimplemented!(),
         }

@@ -1,59 +1,13 @@
-type Vec2 = {
-    f32,
-	f32,
-};
-
-type MoreStuff = {
-    x: {},
-	y: { f32 },
-	z: { x: f32, y: f32 },
-};
-
-// {} is a zst type. Notice that it could be both a struct
-// and a tuple
-
-// A named collection:
-// { x: f32, y: f32 }
-//
-// An unnamed collection:
-// { f32, f32 }
-
-type SubCollections = {
-    pos: { x: f32, y: f32 },
-	vel: { x: f32, y: f32 },
-};
-
-// Function pointer: {} -> {}
-
-// Vec is a different type
-// than Vec2.
-type Vec = Vec2;
-
-const MORE_CONSTANTS = (
-	1;
-	2;
-	3;
-	4;
-	5
+const main = [] -> [f32] (
+    let x = x * 5 + 2 * 3;
+    x
 );
 
-const HI2 = (
-    let x = 3;
-	let y = 50;
-	let z = 50;
+// We need parenthesees here, so that we can
+// see it's a function and not an array. I may
+// change this later, though, so that "[num: *f32] *num;" is all you need
+const add_1 = [num: *f32] ( *num );
 
-    { };
-	{ 3.0, "hello", "hi" };
-
-    let x = (
-		type Pos = { x: f32, y: f32, width: f32, height: f32 };
-
-	    50
-	);
-
-    (
-		(
-			3
-		)
-	)
-);
+// In this case it knows it's a function,
+// so you don't need the parenthesees :^)
+const add_2 = [num: *f32] -> [] *num;

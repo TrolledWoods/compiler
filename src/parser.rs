@@ -357,11 +357,107 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
             }
         }
         Some(Token {
+            kind: TokenKind::OpeningBracket(BracketKind::Brack),
+            start,
+            end,
+        }) => {
+            // Array type: [] i32
+            // Function type: [i32] -> []
+
+            let (list_pos, list) = parse_unique_named_or_unnamed_list(
+                parser,
+                ListGrammar::square(),
+                |parser| parse_expression(parser, id),
+                |parser| parse_type(parser),
+                ParsingActivity::Block,
+            )?;
+
+            match parser.peek_token(0)? {
+                Some(Token {
+                    kind:
+                        TokenKind::Operator {
+                            kind: OpKind::ReturnArrow,
+                            is_assignment: false,
+                        },
+                    ..
+                }) => {
+                    let args = match list {
+                        UniqueListKind::Empty => vec![],
+                        UniqueListKind::Named(elements) => elements,
+                        UniqueListKind::Unnamed(_) => {
+                            panic!("TODO: Function definition without arg names")
+                        }
+                    };
+
+                    parser.eat_token()?;
+
+                    // Parse return args
+                    let (return_pos, returns) = parse_list(
+                        parser,
+                        ListGrammar::square(),
+                        |parser| parse_type(parser),
+                        ParsingActivity::Block,
+                    )?;
+
+                    // Parse function body
+                    let sub_id = parser
+                        .manager
+                        .namespace_manager
+                        .create_anonymous_namespace(id);
+                    let content = parse_value(parser, sub_id)?;
+
+                    Ok(ast::ExpressionDef {
+                        kind: ast::ExpressionDefKind::Function(args, returns, Box::new(content)),
+                        pos: list_pos,
+                    })
+                }
+                Some(Token {
+                    kind: TokenKind::OpeningBracket(BracketKind::Paren),
+                    ..
+                }) => {
+                    let args = match list {
+                        UniqueListKind::Empty => vec![],
+                        UniqueListKind::Named(elements) => elements,
+                        UniqueListKind::Unnamed(_) => {
+                            panic!("TODO: Function definition without arg names")
+                        }
+                    };
+
+                    // Function without return args
+                    let sub_id = parser
+                        .manager
+                        .namespace_manager
+                        .create_anonymous_namespace(id);
+                    let content = parse_value(parser, sub_id)?;
+
+                    Ok(ast::ExpressionDef {
+                        kind: ast::ExpressionDefKind::Function(args, vec![], Box::new(content)),
+                        pos: list_pos,
+                    })
+                }
+                _ => {
+                    let members = match list {
+                        UniqueListKind::Empty => vec![],
+                        UniqueListKind::Unnamed(elements) => elements,
+                        UniqueListKind::Named(_) => {
+                            panic!("TODO: Array definition with arg names is not allowed")
+                        }
+                    };
+                    //
+                    // This is an array
+                    Ok(ast::ExpressionDef {
+                        kind: ast::ExpressionDefKind::Array(members),
+                        pos: list_pos,
+                    })
+                }
+            }
+        }
+        Some(Token {
             kind: TokenKind::OpeningBracket(BracketKind::Curly),
             start,
             end,
         }) => {
-            // Either a function, a struct, a tuple or a nil
+            // Either a struct, a tuple or a nil
             let (list_pos, list) = parse_named_or_unnamed_list(
                 parser,
                 ListGrammar::curly(),
@@ -369,47 +465,25 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
                 ParsingActivity::Block,
             )?;
 
-            // Try parsing a function definition
-            if try_parse_kind(
-                parser,
-                &TokenKind::Operator {
-                    kind: OpKind::ReturnArrow,
-                    is_assignment: false,
-                },
-            )?
-            .is_some()
-            {
-                let args = match list {
-                    ListKind::Empty => vec![],
-                    ListKind::Named(members) => members,
-                    ListKind::Unnamed(_) => {
-                        panic!("TODO: Cannot create a function with no argument names")
-                    }
-                };
-
-                unimplemented!();
-            } else {
-                // It wasn't a function
-                match list {
-                    ListKind::Empty => Ok(ast::ExpressionDef {
-                        pos: list_pos,
-                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
-                            vec![],
-                        )),
-                    }),
-                    ListKind::Named(members) => Ok(ast::ExpressionDef {
-                        pos: list_pos,
-                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Named(
-                            members,
-                        )),
-                    }),
-                    ListKind::Unnamed(members) => Ok(ast::ExpressionDef {
-                        pos: list_pos,
-                        kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
-                            members,
-                        )),
-                    }),
-                }
+            match list {
+                ListKind::Empty => Ok(ast::ExpressionDef {
+                    pos: list_pos,
+                    kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
+                        vec![],
+                    )),
+                }),
+                ListKind::Named(members) => Ok(ast::ExpressionDef {
+                    pos: list_pos,
+                    kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Named(
+                        members,
+                    )),
+                }),
+                ListKind::Unnamed(members) => Ok(ast::ExpressionDef {
+                    pos: list_pos,
+                    kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
+                        members,
+                    )),
+                }),
             }
         }
         Some(Token {
@@ -763,8 +837,7 @@ pub fn parse_type_def(
         ParsingActivity::TypeDef,
     )?;
 
-    let mut _deps = Vec::new();
-    let type_def = parse_type(parser, &mut _deps)?;
+    let type_def = parse_type(parser)?;
     parser
         .manager
         .insert_named_type(namespace_id, identifier, type_def)?;
@@ -774,10 +847,63 @@ pub fn parse_type_def(
     Ok(())
 }
 
-enum ListKind<V> {
+type ListKind<V> = UniqueListKind<V, V>;
+
+enum UniqueListKind<N, U> {
     Empty,
-    Named(Vec<(Identifier, V)>),
-    Unnamed(Vec<V>),
+    Named(Vec<(Identifier, N)>),
+    Unnamed(Vec<U>),
+}
+
+fn parse_unique_named_or_unnamed_list<N, U>(
+    parser: &mut Parser,
+    grammar: ListGrammar,
+    mut parse_unnamed_value: impl FnMut(&mut Parser) -> Result<U, ParseError>,
+    mut parse_named_value: impl FnMut(&mut Parser) -> Result<N, ParseError>,
+    activity: ParsingActivity,
+) -> Result<(SourcePos, UniqueListKind<N, U>), ParseError> {
+    let start = match parser.peek_token(0)? {
+        Some(Token { kind, start, .. }) if kind == grammar.start => start,
+        _ => {
+            return Err(UnexpectedTokenError {
+                file: parser.file,
+                activity,
+                expected: vec![ExpectedValue::Kind(grammar.start)],
+                got: parser.peek_token(0)?.into(),
+            }
+            .into())
+        }
+    };
+
+    // Determine wether it is named or not
+    match (parser.peek_token(1)?, parser.peek_token(2)?) {
+        (Some(Token { kind, .. }), _) if kind == grammar.end => {
+            parser.eat_token()?;
+            let terminator = parser.eat_token()?.unwrap();
+            Ok((
+                SourcePos {
+                    file: parser.file,
+                    start,
+                    end: terminator.end,
+                },
+                UniqueListKind::Empty,
+            ))
+        }
+        (
+            _,
+            Some(Token {
+                kind:
+                    TokenKind::Operator {
+                        kind: OpKind::Declaration,
+                        is_assignment: false,
+                    },
+                ..
+            }),
+        ) => parse_named_list(parser, grammar, parse_named_value, activity)
+            .map(|(pos, list)| (pos, UniqueListKind::Named(list))),
+        (_, _) => parse_list(parser, grammar, parse_unnamed_value, activity)
+            .map(|(pos, list)| (pos, UniqueListKind::Unnamed(list))),
+    }
 }
 
 fn parse_named_or_unnamed_list<V>(
@@ -913,13 +1039,13 @@ impl ListGrammar {
         }
     }
 
-    // pub fn square() -> ListGrammar {
-    //     ListGrammar {
-    //         start: TokenKind::OpeningBracket(BracketKind::Brack),
-    //         separator: TokenKind::Separator,
-    //         end: TokenKind::ClosingBracket(BracketKind::Brack),
-    //     }
-    // }
+    pub fn square() -> ListGrammar {
+        ListGrammar {
+            start: TokenKind::OpeningBracket(BracketKind::Brack),
+            separator: TokenKind::Separator,
+            end: TokenKind::ClosingBracket(BracketKind::Brack),
+        }
+    }
 
     pub fn curly() -> ListGrammar {
         ListGrammar {
@@ -1009,14 +1135,11 @@ fn parse_list<V>(
     }
 }
 
-fn parse_collection(
-    parser: &mut Parser,
-    dependencies: &mut Dependencies,
-) -> Result<(SourcePos, CollectionDefKind), ParseError> {
+fn parse_collection(parser: &mut Parser) -> Result<(SourcePos, CollectionDefKind), ParseError> {
     let (pos, members) = parse_named_or_unnamed_list(
         parser,
         ListGrammar::curly(),
-        |parser| parse_type(parser, dependencies),
+        |parser| parse_type(parser),
         ParsingActivity::StructMember,
     )?;
 
@@ -1034,13 +1157,13 @@ fn parse_collection(
     }
 }
 
-fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<TypeDef, ParseError> {
+fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     match parser.peek_token(0)? {
         Some(Token {
             kind: TokenKind::OpeningBracket(BracketKind::Curly),
             ..
         }) => {
-            let (pos, collection) = parse_collection(parser, dependencies)?;
+            let (pos, collection) = parse_collection(parser)?;
 
             if let Some(_) = try_parse_kind(
                 parser,
@@ -1058,7 +1181,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
                     }
                 };
 
-                let (return_pos, returns) = parse_collection(parser, dependencies)?;
+                let (return_pos, returns) = parse_collection(parser)?;
 
                 let returns = match returns {
                     CollectionDefKind::Unnamed(members) => members,
@@ -1100,7 +1223,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
             ..
         }) => {
             parser.eat_token()?;
-            let internal_type = parse_type(parser, dependencies)?;
+            let internal_type = parse_type(parser)?;
             Ok(TypeDef {
                 pos: SourcePos {
                     file: parser.file,
@@ -1113,7 +1236,7 @@ fn parse_type(parser: &mut Parser, dependencies: &mut Dependencies) -> Result<Ty
         Some(Token {
             kind: TokenKind::Identifier(_),
             ..
-        }) => parse_offloaded_type(parser, dependencies),
+        }) => parse_offloaded_type(parser),
         c => Err(UnexpectedTokenError {
             file: parser.file,
             activity: ParsingActivity::Type,
@@ -1132,17 +1255,14 @@ fn parse_tuple_type(
     let (pos, members) = parse_list(
         parser,
         ListGrammar::parenthesis(),
-        |value| parse_type(value, dependencies),
+        |value| parse_type(value),
         ParsingActivity::Tuple,
     )?;
 
     Ok((pos, members))
 }
 
-fn parse_offloaded_type(
-    parser: &mut Parser,
-    dependencies: &mut Dependencies,
-) -> Result<TypeDef, ParseError> {
+fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
     let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
 
     // See if it's a primitive
@@ -1173,7 +1293,7 @@ fn parse_offloaded_type(
     let (pos, generics) = match try_parse_list(
         parser,
         ListGrammar::angle(),
-        |value| parse_type(value, dependencies),
+        |value| parse_type(value),
         ParsingActivity::OffloadedType,
     )? {
         Some((generics_pos, list)) => (
@@ -1186,18 +1306,6 @@ fn parse_offloaded_type(
         ),
         None => (name.pos.clone(), vec![]),
     };
-
-    let mut added_dep = false;
-    for (dep, positions) in dependencies.iter_mut() {
-        if *dep == name.data {
-            positions.push(name.pos.clone());
-            added_dep = true;
-            break;
-        }
-    }
-    if !added_dep {
-        dependencies.push((name.data, vec![name.pos.clone()]));
-    }
 
     Ok(TypeDef {
         pos,

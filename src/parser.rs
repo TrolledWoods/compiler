@@ -514,23 +514,20 @@ fn parse_block(
 
                 let name = parse_identifier(parser, ParsingActivity::Let)?;
 
-                let operator = match parser.eat_token()? {
-                    Some(Token {
-                        kind:
-                            TokenKind::Operator {
-                                kind,
-                                is_assignment: true,
-                            },
-                        ..
-                    }) => kind,
-                    _ => panic!("TODO: Expected an assignment operator"),
-                };
+                parse_kind(
+                    parser,
+                    &TokenKind::Operator {
+                        kind: OpKind::NoOp,
+                        is_assignment: true,
+                    },
+                    ParsingActivity::Let,
+                )?;
 
                 let expr = parse_expression(parser, id)?;
 
                 parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Let)?;
 
-                statements.push(ast::StatementDef::Assignment(name, operator, expr));
+                statements.push(ast::StatementDef::Declaration(name, expr));
             }
             Token {
                 kind: TokenKind::Keyword(Keyword::TypeDef),

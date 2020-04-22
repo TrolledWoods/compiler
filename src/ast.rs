@@ -126,7 +126,7 @@ impl ExpressionDefKind {
 
 #[derive(Debug)]
 pub enum StatementDef {
-    Assignment(Identifier, OpKind, ExpressionDef),
+    Declaration(Identifier, ExpressionDef),
     Expression(ExpressionDef),
     Block(Vec<StatementDef>),
 }
@@ -135,8 +135,8 @@ impl StatementDef {
     fn pretty_print(&self, indent: usize) {
         use StatementDef::*;
         match self {
-            Assignment(ident, op, expr) => {
-                print!("let {} {}= ", ident.data, op.glyph());
+            Declaration(ident, expr) => {
+                print!("let {} = ", ident.data);
                 expr.pretty_print(indent);
             }
             Expression(expr) => expr.pretty_print(indent),

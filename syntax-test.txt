@@ -38,18 +38,28 @@ const MORE_CONSTANTS = (
 );
 
 const HI2 = (
-    1 / 2 / 3 / 4;
-
-    type Hello = { f32 };
-	const Other = ( "Hello" );
-
     let x = 3;
 	let y = 50;
 	let z = 50;
 
-	50 + Other + 20;
+    { };
+	{ 3.0, "hello", "hi" };
+	[ "Yes", "Epic", "Stuff" ];
+	{ x: 30.0, y: "cool", 
+		z: 50.0 + (
+			34 + 231 * 23 * 21414 ^ 2
+		) + 20,
+	} * 50;
 
-	(
-	    3
+    let x = (
+		type Pos = { x: f32, y: f32, width: f32, height: f32 };
+
+	    50
+	);
+
+    (
+		(
+			3
+		)
 	)
 );

@@ -68,25 +68,6 @@ impl Display for ParsingActivity {
 	}
 }
 
-#[derive(Debug, Clone)]
-pub enum GotAsToken {
-	Some(Token),
-
-	/// This means we were at the end of the
-	/// file but didn't get a token we had
-	/// to get.
-	None,
-}
-
-impl From<Option<Token>> for GotAsToken {
-	fn from(other: Option<Token>) -> GotAsToken {
-		match other {
-			Some(token) => GotAsToken::Some(token),
-			None => GotAsToken::None,
-		}
-	}
-}
-
 #[derive(Debug)]
 pub enum ParseError {
 	UnexpectedToken(UnexpectedTokenError),
@@ -102,12 +83,12 @@ impl CompileError for ParseError {
 				let message = format!("Unexpected token while parsing {}", error.activity);
 
 				let pos = match error.got {
-					GotAsToken::Some(token) => SourcePos {
+					Some(token) => SourcePos {
 						file: error.file,
 						start: token.start,
 						end: token.end,
 					},
-					GotAsToken::None => SourcePos {
+					None => SourcePos {
 						file: error.file,
 						start: TextPos::end_of_file(),
 						end: TextPos::end_of_file(),
@@ -160,7 +141,7 @@ pub struct UnexpectedTokenError {
 	pub file: TinyString,
 	pub activity: ParsingActivity,
 	pub expected: Vec<ExpectedValue>,
-	pub got: GotAsToken,
+	pub got: Option<Token>,
 }
 
 #[derive(Debug)]
@@ -269,7 +250,7 @@ pub fn parse_namespace(
 			file: parser.file,
 			activity: ParsingActivity::Namespace,
 			expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
-			got: GotAsToken::None,
+			got: None,
 		}
 		.into())
 	}
@@ -592,7 +573,7 @@ fn parse_non_func_call_value(
 			file: parser.file,
 			activity: ParsingActivity::Expression,
 			expected: vec![ExpectedValue::Expression],
-			got: c.into(),
+			got: c,
 		}
 		.into()),
 	}
@@ -726,7 +707,7 @@ fn parse_block(
 		file: parser.file,
 		activity: ParsingActivity::Block,
 		expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
-		got: GotAsToken::None,
+		got: None,
 	}
 	.into())
 }
@@ -763,7 +744,7 @@ fn parse_kind(
 			file: parser.file,
 			activity: doing,
 			expected: vec![ExpectedValue::Kind(kind.clone())],
-			got: token.into(),
+			got: token,
 		}
 		.into()),
 	}
@@ -784,7 +765,7 @@ fn parse_keyword(
 			file: parser.file,
 			activity: doing,
 			expected: vec![ExpectedValue::Keyword(keyword)],
-			got: token.into(),
+			got: token,
 		}
 		.into()),
 	}
@@ -837,7 +818,7 @@ pub fn parse_identifier(
 			file: parser.file,
 			activity: doing,
 			expected: vec![ExpectedValue::Identifier],
-			got: token.into(),
+			got: token,
 		}
 		.into()),
 	}
@@ -891,7 +872,7 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 				file: parser.file,
 				activity,
 				expected: vec![ExpectedValue::Kind(grammar.start)],
-				got: parser.peek_token(0)?.into(),
+				got: parser.peek_token(0)?,
 			}
 			.into())
 		}
@@ -937,7 +918,7 @@ fn parse_named_or_unnamed_list<V>(
 				file: parser.file,
 				activity,
 				expected: vec![ExpectedValue::Kind(grammar.start)],
-				got: parser.peek_token(0)?.into(),
+				got: parser.peek_token(0)?,
 			}
 			.into())
 		}
@@ -992,7 +973,7 @@ fn parse_named_list<V>(
 			file: parser.file,
 			activity,
 			expected: vec![ExpectedValue::Kind(grammar.start)],
-			got: parser.peek_token(0)?.into(),
+			got: parser.peek_token(0)?,
 		}
 		.into());
 	};
@@ -1101,7 +1082,7 @@ fn parse_list<V>(
 			file: parser.file,
 			activity,
 			expected: vec![ExpectedValue::Kind(grammar.start)],
-			got: parser.peek_token(0)?.into(),
+			got: parser.peek_token(0)?,
 		}
 		.into());
 	};
@@ -1232,7 +1213,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			file: parser.file,
 			activity: ParsingActivity::Type,
 			expected: vec![ExpectedValue::Type],
-			got: c.into(),
+			got: c,
 		}
 		.into()),
 	}

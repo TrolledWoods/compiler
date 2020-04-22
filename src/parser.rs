@@ -348,13 +348,20 @@ fn parse_non_func_call_value(
 
 			let (statements, expression) = parse_block(parser, sub_namespace_id)?;
 
-			let expression = match expression {
-				Some(expression) => expression,
-				None => panic!("TODO: Cannot have a non expression code block in a value"),
-			};
-
 			if statements.len() == 0 {
-				Ok(expression)
+				if let Some(expression) = expression {
+					Ok(expression)
+				} else {
+					// An empty block ;D
+					Ok(ast::ExpressionDef {
+						pos: SourcePos {
+							file: parser.file,
+							start,
+							end,
+						},
+						kind: ast::ExpressionDefKind::Block(vec![], None),
+					})
+				}
 			} else {
 				Ok(ast::ExpressionDef {
 					pos: SourcePos {
@@ -362,7 +369,10 @@ fn parse_non_func_call_value(
 						start,
 						end,
 					},
-					kind: ast::ExpressionDefKind::Block(statements, Box::new(expression)),
+					kind: ast::ExpressionDefKind::Block(
+						statements,
+						expression.map(|v| Box::new(v)),
+					),
 				})
 			}
 		}
@@ -599,7 +609,7 @@ fn parse_block(
 				parser.eat_token()?;
 				return Ok((statements, None));
 			}
-			Token {
+			/* Token {
 				kind: TokenKind::OpeningBracket(BracketKind::Paren),
 				start,
 				end,
@@ -628,14 +638,14 @@ fn parse_block(
 							},
 							kind: ast::ExpressionDefKind::Block(
 								block_statements,
-								Box::new(expression),
+								Some(Box::new(expression)),
 							),
 						}),
 					));
 				} else {
 					statements.push(ast::StatementDef::Block(block_statements));
 				}
-			}
+			} */
 			Token {
 				kind: TokenKind::Keyword(Keyword::Let),
 				start,

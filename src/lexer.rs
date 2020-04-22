@@ -528,15 +528,6 @@ impl Lexer<'_> {
 				const SMALL_OPERATORS: &[&str] =
 					&["+", "-", "<", ">", "*", "/", "%", "^", "~", "&", "|", "@"];
 
-				if self.is_this_next("=") {
-					self.next_char();
-					return Ok(ReadTokenState::Token(Token {
-						kind: TokenKind::AssignmentOperator(""),
-						start,
-						end: self.current_pos,
-					}));
-				}
-
 				for op in LARGE_OPERATORS {
 					if self.is_this_next(op) {
 						for _ in 0..op.len() {
@@ -549,6 +540,15 @@ impl Lexer<'_> {
 							end: self.current_pos,
 						}));
 					}
+				}
+
+				if self.is_this_next("=") {
+					self.next_char();
+					return Ok(ReadTokenState::Token(Token {
+						kind: TokenKind::AssignmentOperator(""),
+						start,
+						end: self.current_pos,
+					}));
 				}
 
 				for op in SMALL_OPERATORS {

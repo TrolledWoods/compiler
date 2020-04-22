@@ -99,7 +99,7 @@ pub enum ExpressionDefKind {
 	StringLiteral(TinyString),
 	IntLiteral(i128),
 	FloatLiteral(f64),
-	Block(Vec<StatementDef>, Box<ExpressionDef>),
+	Block(Vec<StatementDef>, Option<Box<ExpressionDef>>),
 }
 
 impl ExpressionDefKind {
@@ -163,16 +163,20 @@ impl ExpressionDefKind {
 						println!(";");
 					}
 
-					print_indent(indent + 1);
-					expression.pretty_print(indent + 1);
-					println!("");
+					if let Some(expression) = &expression {
+						print_indent(indent + 1);
+						expression.pretty_print(indent + 1);
+						println!("");
+					}
 
 					print_indent(indent);
 					print!(")");
 				} else {
-					print!("(");
-					expression.pretty_print(indent);
-					print!(")");
+					if let Some(expression) = expression {
+						print!("(");
+						expression.pretty_print(indent);
+						print!(")");
+					}
 				}
 			}
 			Function(args, returns, body) => {

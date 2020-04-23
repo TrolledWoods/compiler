@@ -2,7 +2,7 @@ use crate::ast;
 use crate::compilation_manager::{CompileManager, Dependencies, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
-use crate::lexer::{BracketKind, Lexer, LexerError, Literal, SourcePos, TextPos, Token, TokenKind};
+use crate::lexer::{Lexer, LexerError, Literal, SourcePos, TextPos, Token, TokenKind};
 use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator;
 use crate::string_pile::TinyString;
@@ -161,8 +161,7 @@ pub enum ExpectedValue {
 	Kind(TokenKind),
 
 	Keyword(Keyword),
-	ClosingBracket(BracketKind),
-	OpeningBracket(BracketKind),
+	Bracket(char),
 
 	UnnamedListEntry,
 	NamedListEntry,
@@ -179,8 +178,7 @@ impl Display for ExpectedValue {
 			Expression => write!(f, "expression"),
 			Kind(kind) => write!(f, "kind '{:?}'", kind),
 			Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
-			ClosingBracket(kind) => write!(f, "closing {:?}", kind),
-			OpeningBracket(kind) => write!(f, "opening {:?}", kind),
+			Bracket(c) => write!(f, "{:?}", c),
 			UnnamedListEntry => write!(f, "unnamed list entry"),
 			NamedListEntry => write!(f, "named list entry"),
 		}
@@ -227,7 +225,7 @@ pub fn parse_namespace(
 ) -> Result<(), ParseError> {
 	while let Some(token) = parser.peek_token(0)? {
 		if let Token {
-			kind: TokenKind::ClosingBracket(BracketKind::Curly),
+			kind: TokenKind::Bracket('}'),
 			..
 		} = token
 		{
@@ -261,7 +259,7 @@ pub fn parse_namespace(
 		debug_err!(UnexpectedTokenError {
 			file: parser.file,
 			activity: ParsingActivity::Namespace,
-			expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
+			expected: vec![ExpectedValue::Bracket('}')],
 			got: None,
 		})
 	}
@@ -313,7 +311,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 	let value: Result<ast::ExpressionDef, ParseError> = match parser.peek_token(0)? {
 		// A block
 		Some(Token {
-			kind: TokenKind::OpeningBracket(BracketKind::Paren),
+			kind: TokenKind::Bracket('('),
 			start,
 			end,
 		}) => {
@@ -340,7 +338,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 		}
 		// Either a function definition or an array definition.
 		Some(Token {
-			kind: TokenKind::OpeningBracket(BracketKind::Brack),
+			kind: TokenKind::Bracket('['),
 			start,
 			end,
 		}) => {
@@ -362,7 +360,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 					..
 				})
 				| Some(Token {
-					kind: TokenKind::OpeningBracket(BracketKind::Paren),
+					kind: TokenKind::Bracket('('),
 					..
 				}) => {
 					// A function definition!
@@ -412,7 +410,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 		}
 		// A collection
 		Some(Token {
-			kind: TokenKind::OpeningBracket(BracketKind::Curly),
+			kind: TokenKind::Bracket('{'),
 			start,
 			end,
 		}) => {
@@ -479,7 +477,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 
 	// Parse function calls
 	while let Some(Token {
-		kind: TokenKind::OpeningBracket(BracketKind::Brack),
+		kind: TokenKind::Bracket('['),
 		..
 	}) = parser.peek_token(0)?
 	{
@@ -507,17 +505,13 @@ fn parse_block(
 	parser: &mut Parser<'_>,
 	id: NamespaceId,
 ) -> Result<(Vec<ast::StatementDef>, Option<ast::ExpressionDef>), ParseError> {
-	parse_kind(
-		parser,
-		&TokenKind::OpeningBracket(BracketKind::Paren),
-		ParsingActivity::Block,
-	)?;
+	parse_kind(parser, &TokenKind::Bracket('('), ParsingActivity::Block)?;
 
 	let mut statements = Vec::new();
 	while let Some(token) = parser.peek_token(0)? {
 		match token {
 			Token {
-				kind: TokenKind::ClosingBracket(BracketKind::Paren),
+				kind: TokenKind::Bracket(')'),
 				..
 			} => {
 				parser.eat_token()?;
@@ -580,7 +574,7 @@ fn parse_block(
 						statements.push(ast::StatementDef::Assignment(expression, op, right));
 					}
 					Some(Token {
-						kind: TokenKind::ClosingBracket(BracketKind::Paren),
+						kind: TokenKind::Bracket(')'),
 						..
 					}) => {
 						return Ok((statements, Some(expression)));
@@ -600,7 +594,7 @@ fn parse_block(
 	debug_err!(UnexpectedTokenError {
 		file: parser.file,
 		activity: ParsingActivity::Block,
-		expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
+		expected: vec![ExpectedValue::Bracket('}')],
 		got: None,
 	})
 }
@@ -897,25 +891,25 @@ pub struct ListGrammar {
 impl ListGrammar {
 	pub fn parenthesis() -> ListGrammar {
 		ListGrammar {
-			start: TokenKind::OpeningBracket(BracketKind::Paren),
+			start: TokenKind::Bracket('('),
 			separator: TokenKind::Separator,
-			end: TokenKind::ClosingBracket(BracketKind::Paren),
+			end: TokenKind::Bracket(')'),
 		}
 	}
 
 	pub fn square() -> ListGrammar {
 		ListGrammar {
-			start: TokenKind::OpeningBracket(BracketKind::Brack),
+			start: TokenKind::Bracket('['),
 			separator: TokenKind::Separator,
-			end: TokenKind::ClosingBracket(BracketKind::Brack),
+			end: TokenKind::Bracket(']'),
 		}
 	}
 
 	pub fn curly() -> ListGrammar {
 		ListGrammar {
-			start: TokenKind::OpeningBracket(BracketKind::Curly),
+			start: TokenKind::Bracket('{'),
 			separator: TokenKind::Separator,
-			end: TokenKind::ClosingBracket(BracketKind::Curly),
+			end: TokenKind::Bracket('}'),
 		}
 	}
 
@@ -1026,7 +1020,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			})
 		}
 		Some(Token {
-			kind: TokenKind::OpeningBracket(BracketKind::Brack),
+			kind: TokenKind::Bracket('['),
 			start,
 			..
 		}) => {
@@ -1040,11 +1034,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 					parser.eat_token()?;
 					parser.eat_token()?;
 
-					parse_kind(
-						parser,
-						&TokenKind::ClosingBracket(BracketKind::Brack),
-						ParsingActivity::Type,
-					)?;
+					parse_kind(parser, &TokenKind::Bracket('}'), ParsingActivity::Type)?;
 
 					let count: usize = match count.try_into() {
 						Ok(v) if v > 0 => v,
@@ -1088,7 +1078,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			}
 		}
 		Some(Token {
-			kind: TokenKind::OpeningBracket(BracketKind::Curly),
+			kind: TokenKind::Bracket('{'),
 			..
 		}) => {
 			let (pos, collection) = parse_collection(parser)?;

@@ -32,8 +32,7 @@ impl Display for Literal {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
-	OpeningBracket(BracketKind),
-	ClosingBracket(BracketKind),
+	Bracket(char),
 	Terminator,
 	Separator,
 	ReturnArrow,
@@ -157,14 +156,6 @@ impl std::fmt::Debug for TextPos {
 
 		write!(f, "{}:{}", self.line + 1, self.character + 1)
 	}
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BracketKind {
-	Paren,
-	Curly,
-	Brack,
-	// Potentially <> brackets too?
 }
 
 enum ReadTokenState {
@@ -420,15 +411,6 @@ impl Lexer<'_> {
 					end: start,
 				}))
 			}
-			Some('(') => {
-				let start = self.current_pos;
-				self.next_char();
-				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::OpeningBracket(BracketKind::Paren),
-					start,
-					end: start,
-				}))
-			}
 			Some(c) if self.is_this_next("[-]") => {
 				let start = self.current_pos;
 				self.next_char();
@@ -453,47 +435,11 @@ impl Lexer<'_> {
 					end: self.current_pos,
 				}))
 			}
-			Some('[') => {
+			Some(c) if "(){}[]".contains(c) => {
 				let start = self.current_pos;
 				self.next_char();
 				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::OpeningBracket(BracketKind::Brack),
-					start,
-					end: start,
-				}))
-			}
-			Some('{') => {
-				let start = self.current_pos;
-				self.next_char();
-				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::OpeningBracket(BracketKind::Curly),
-					start,
-					end: start,
-				}))
-			}
-			Some(')') => {
-				let start = self.current_pos;
-				self.next_char();
-				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::ClosingBracket(BracketKind::Paren),
-					start,
-					end: start,
-				}))
-			}
-			Some(']') => {
-				let start = self.current_pos;
-				self.next_char();
-				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::ClosingBracket(BracketKind::Brack),
-					start,
-					end: start,
-				}))
-			}
-			Some('}') => {
-				let start = self.current_pos;
-				self.next_char();
-				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::ClosingBracket(BracketKind::Curly),
+					kind: TokenKind::Bracket(c),
 					start,
 					end: start,
 				}))

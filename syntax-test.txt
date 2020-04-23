@@ -1,8 +1,6 @@
-const main = [] -> [] (
-	let tiny_function: [] -> [] = [](
-		x;
-	);
+type Hi = { x: f32, y: f32, epic: *Hi };
 
+const main = [] -> [{Hi2, Hi}] (
 	let x: f32 = 500.0 + "hi" * 50 % (
 		const other = 20;
 

@@ -31,13 +31,7 @@ impl TypeDef {
 			}
 			Pointer(data) => data.get_unsized_dependencies(on_find_dependency)?,
 			FunctionPtr(header) => {
-				for member in &header.args {
-					member.get_unsized_dependencies(on_find_dependency)?;
-				}
-
-				for member in &header.returns {
-					member.get_unsized_dependencies(on_find_dependency)?;
-				}
+				header.get_unsized_dependencies(on_find_dependency)?;
 			}
 			Struct(members) => {
 				for (_, member) in members {
@@ -55,14 +49,17 @@ impl TypeDef {
 
 	pub fn get_dependencies<E>(
 		&self,
-		mut on_find_dependency: &mut impl FnMut(TinyString) -> Result<(), E>,
+		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
 	) -> Result<(), E> {
 		use TypeDefKind::*;
 		match &self.kind {
-			Offload(name) => on_find_dependency(*name)?,
+			Offload(name) => on_find_dependency(Identifier {
+				data: *name,
+				pos: self.pos.clone(),
+			})?,
 			Tuple(members) => {
 				for member in members {
-					member.get_dependencies(on_find_dependency)?;
+					member.get_unsized_dependencies(on_find_dependency)?;
 				}
 			}
 			Pointer(data) => (),
@@ -74,8 +71,8 @@ impl TypeDef {
 			}
 			Primitive(kind) => (),
 			StaticArray(_, content) => content.get_dependencies(on_find_dependency)?,
-			ArrayWindow(_) => (),
-			DynamicArray(_) => (),
+			ArrayWindow(content) => (),
+			DynamicArray(content) => (),
 		}
 
 		Ok(())
@@ -205,6 +202,38 @@ impl PrimitiveKind {
 pub struct FunctionHeader<T> {
 	pub args: Vec<T>,
 	pub returns: Vec<T>,
+}
+
+impl FunctionHeader<TypeDef> {
+	pub fn get_unsized_dependencies<E>(
+		&self,
+		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+	) -> Result<(), E> {
+		for member in &self.args {
+			member.get_unsized_dependencies(on_find_dependency)?;
+		}
+
+		for member in &self.returns {
+			member.get_unsized_dependencies(on_find_dependency)?;
+		}
+
+		Ok(())
+	}
+
+	pub fn get_dependencies<E>(
+		&self,
+		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+	) -> Result<(), E> {
+		for member in &self.args {
+			member.get_dependencies(on_find_dependency)?;
+		}
+
+		for member in &self.returns {
+			member.get_dependencies(on_find_dependency)?;
+		}
+
+		Ok(())
+	}
 }
 
 impl<T: Display> Display for FunctionHeader<T> {

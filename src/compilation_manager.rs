@@ -206,6 +206,7 @@ impl CompileManager {
 		body.pretty_print(0);
 		let id = self.functions.insert(FunctionCompUnit {
 			pos,
+			namespace_id,
 			dependencies: BTreeSet::new(),
 			header_names: names,
 			header,
@@ -264,6 +265,64 @@ impl CompileManager {
 	}
 
 	fn advance_function(&self, id: FunctionId) -> Result<(), CompileManagerError> {
+		let mut comp_unit = self.functions.get_mut(id).expect("Invalid FunctionId");
+		let FunctionCompUnit {
+			pos,
+			namespace_id,
+			dependencies,
+			header_names,
+			header,
+			body,
+			typed,
+			stage,
+		} = &mut comp_unit as &mut FunctionCompUnit;
+
+		match stage {
+			FunctionStage::Defined => {
+				*stage = FunctionStage::Poisoned;
+
+				header.get_dependencies(&mut |dep| {
+					println!("{:?}", dep);
+
+					let (_dependency_pos, dependency_id) = self
+						.namespace_manager
+						.get_member(*namespace_id, dep.data)
+						.map_err(|err| {
+							CompileManagerError::dependency_not_in_namespace(err, pos.clone())
+						})?;
+
+					let (_, mut named_type) =
+						self.get_named_type_mut_or(dependency_id, |general_comp_unit| {
+							CompileManagerError::ExpectedType {
+								pos: pos.clone(),
+								reference_pos: general_comp_unit.pos,
+							}
+						})?;
+
+					// Depend on the fully sized field of the
+					// named_type. TODO: Make this the sized field
+					if named_type
+						.fully_sized
+						.insert_dependency(CompilationUnitId::Function(id))
+					{
+						dependencies.insert(dependency_id);
+					}
+
+					Ok(())
+				})?;
+
+				*stage = FunctionStage::Typed;
+
+				println!("Sent off dependencies for function header types!");
+
+				if dependencies.len() == 0 {
+					std::mem::drop(comp_unit);
+					self.advance_function(id);
+				}
+			}
+			_ => unimplemented!(),
+		}
+
 		Ok(())
 	}
 
@@ -289,7 +348,7 @@ impl CompileManager {
 				definition.get_dependencies(&mut |dep| {
 					let (_dependency_pos, dependency_id) = self
 						.namespace_manager
-						.get_member(*namespace_id, dep)
+						.get_member(*namespace_id, dep.data)
 						.map_err(|err| {
 							CompileManagerError::dependency_not_in_namespace(
 								err,
@@ -407,6 +466,7 @@ create_id!(FunctionId);
 pub enum FunctionStage {
 	Poisoned,
 	Defined,
+	WaitingForTyping,
 	Typed,
 	DependantsDone,
 }
@@ -414,6 +474,7 @@ pub enum FunctionStage {
 pub struct FunctionCompUnit {
 	pub pos: SourcePos,
 	pub dependencies: BTreeSet<CompilationUnitId>,
+	pub namespace_id: NamespaceId,
 
 	pub header_names: Vec<Identifier>,
 	pub header: FunctionHeader<TypeDef>,
@@ -448,7 +509,8 @@ impl CompUnit for FunctionCompUnit {
 		match stage {
 			FunctionStage::Poisoned => None,
 			FunctionStage::Defined => None,
-			FunctionStage::Typed => self.typed.get_dependants_mut(),
+			FunctionStage::WaitingForTyping => self.typed.get_dependants_mut(),
+			FunctionStage::Typed => None, // TODO: Fix this one
 			FunctionStage::DependantsDone => None,
 		}
 	}
@@ -574,4 +636,9 @@ pub struct CompUnitWindowMut<'a> {
 pub struct Identifier {
 	pub pos: SourcePos,
 	pub data: TinyString,
+}
+
+pub enum Dependency {
+	CompUnit(SourcePos, CompilationUnitId),
+	Name(Identifier),
 }

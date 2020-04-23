@@ -1,4 +1,4 @@
-use crate::compilation_manager::{FunctionId, Identifier};
+use crate::compilation_manager::{CompilationUnitId, Dependency, FunctionId, Identifier};
 use crate::lexer::{Literal, SourcePos};
 use crate::parser::ListKind;
 use crate::string_pile::TinyString;
@@ -21,7 +21,7 @@ impl ExpressionDef {
 
 	pub fn get_dependencies<E>(
 		&self,
-		mut on_find_dep: &mut impl FnMut(Identifier) -> Result<(), E>,
+		mut on_find_dep: &mut impl FnMut(Dependency) -> Result<(), E>,
 	) -> Result<(), E> {
 		use ExpressionDefKind::*;
 		match &self.kind {
@@ -39,7 +39,10 @@ impl ExpressionDef {
 				}
 			}
 			Function(id) => {
-				println!("MAKE DEPENDENCIES SUPPORT COMPILATION UNIT ID:S TOO");
+				on_find_dep(Dependency::CompUnit(
+					self.pos.clone(),
+					CompilationUnitId::Function(*id),
+				))?;
 			}
 			Array(members) => {
 				for member in members {
@@ -60,10 +63,10 @@ impl ExpressionDef {
 				}
 			},
 			Offload(name) => {
-				on_find_dep(Identifier {
+				on_find_dep(Dependency::Name(Identifier {
 					data: *name,
 					pos: self.pos.clone(),
-				})?;
+				}))?;
 			}
 			Literal(_) => (),
 			Block(_, _) => unimplemented!(),

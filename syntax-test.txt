@@ -7,6 +7,8 @@ const main = [] -> [] (
 		y
 	);
 
+	x[][][][]["hi", "you", "suck" + 50 - (hi)][][{}];
+
 	x + y * (
 		"hello" * (
 			"hello" * (

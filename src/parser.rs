@@ -16,11 +16,6 @@ pub struct Parser<'a> {
 	pub manager: Arc<CompileManager>,
 	pub file: TinyString,
 	pub tokens: Lexer<'a>,
-
-	/// Only used for debugging.
-	/// Is just a stack of code
-	/// places that were called
-	pub call_stack: Vec<String>,
 }
 
 impl Parser<'_> {
@@ -48,6 +43,7 @@ pub enum ParsingActivity {
 	LoadNamespace,
 	TypeDef,
 	Expression,
+	Value,
 	Block,
 	Let,
 }
@@ -67,6 +63,7 @@ impl Display for ParsingActivity {
 			Namespace => write!(f, "namespace"),
 			LoadNamespace => write!(f, "external namespace load"),
 			Expression => write!(f, "expression"),
+			Value => write!(f, "value"),
 			TypeDef => write!(f, "type definition"),
 			Block => write!(f, "block"),
 			Let => write!(f, "let"),
@@ -77,6 +74,7 @@ impl Display for ParsingActivity {
 #[derive(Debug)]
 pub enum ParseError {
 	UnexpectedToken(UnexpectedTokenError),
+	InvalidStaticArraySize(SourcePos),
 	Lexer(LexerError),
 	Namespace(NamespaceError),
 	IoError(String, std::io::Error),
@@ -113,6 +111,10 @@ impl CompileError for ParseError {
 				}
 
 				ErrorPrintingData::new(message).problem(pos, expected)
+			}
+			ParseError::InvalidStaticArraySize(pos) => {
+				ErrorPrintingData::new(format!("Invalid static array size"))
+					.problem(pos, format!("Static array size has to be bigger than 0"))
 			}
 			ParseError::Lexer(error) => error.get_printing_data(),
 			ParseError::Namespace(error) => error.get_printing_data(),
@@ -157,6 +159,7 @@ pub enum ExpectedValue {
 	Type,
 	ConstantDefinitionValue,
 	Expression,
+	Value,
 
 	Kind(TokenKind),
 
@@ -176,6 +179,7 @@ impl Display for ExpectedValue {
 			Type => write!(f, "type"),
 			ConstantDefinitionValue => write!(f, "constant definition value"),
 			Expression => write!(f, "expression"),
+			Value => write!(f, "value"),
 			Kind(kind) => write!(f, "kind '{:?}'", kind),
 			Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
 			Bracket(c) => write!(f, "{:?}", c),
@@ -208,7 +212,6 @@ pub fn parse_file(
 			.expect("String conversion not possible :<")
 			.into(),
 		tokens: lexer,
-		call_stack: Vec::new(),
 	};
 
 	parse_namespace(&mut parser, false, namespace_id)
@@ -467,8 +470,8 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 		}
 		c => debug_err!(UnexpectedTokenError {
 			file: parser.file,
-			activity: ParsingActivity::Expression,
-			expected: vec![ExpectedValue::Expression],
+			activity: ParsingActivity::Value,
+			expected: vec![ExpectedValue::Value],
 			got: c,
 		}),
 	};
@@ -585,7 +588,19 @@ fn parse_block(
 					}) => {
 						statements.push(ast::StatementDef::Expression(expression));
 					}
-					_ => panic!("TODO: Invalid token after expression in block"),
+					got => {
+						return debug_err!(UnexpectedTokenError {
+							file: parser.file,
+							activity: ParsingActivity::Block,
+							expected: vec![
+								ExpectedValue::Kind(TokenKind::Terminator),
+								ExpectedValue::Kind(TokenKind::Bracket(')')),
+								ExpectedValue::Kind(TokenKind::AssignmentOperator("")),
+								ExpectedValue::Kind(TokenKind::Bracket('[')),
+							],
+							got,
+						})
+					}
 				}
 			}
 		}
@@ -822,7 +837,7 @@ fn parse_named_or_unnamed_list<N, U>(
 					err!(UnexpectedTokenError {
 						file: parser.file,
 						activity: activity,
-						expected: vec![ExpectedValue::NamedListEntry],
+						expected: vec![ExpectedValue::UnnamedListEntry],
 						got: parser.peek_token(0).unwrap(),
 					})
 				})?;
@@ -849,7 +864,7 @@ fn parse_named_or_unnamed_list<N, U>(
 					err!(UnexpectedTokenError {
 						file: parser.file,
 						activity: activity,
-						expected: vec![ExpectedValue::UnnamedListEntry],
+						expected: vec![ExpectedValue::NamedListEntry],
 						got: parser.peek_token(0).unwrap(),
 					})
 				})?;
@@ -1027,18 +1042,22 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			match parser.peek_token(1)? {
 				Some(Token {
 					kind: TokenKind::Literal(Literal::Int(count)),
+					start: num_start,
 					end,
-					..
 				}) => {
 					// This is a statically sized array
 					parser.eat_token()?;
 					parser.eat_token()?;
 
-					parse_kind(parser, &TokenKind::Bracket('}'), ParsingActivity::Type)?;
+					parse_kind(parser, &TokenKind::Bracket(']'), ParsingActivity::Type)?;
 
 					let count: usize = match count.try_into() {
 						Ok(v) if v > 0 => v,
-						Err(_) | Ok(_) => panic!("TODO: Invalid array size number"),
+						Err(_) | Ok(_) => {
+							return debug_err!(ParseError::InvalidStaticArraySize(source_pos(
+								parser, num_start, end
+							)))
+						}
 					};
 
 					let sub_type = parse_type(parser)?;

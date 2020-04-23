@@ -408,7 +408,7 @@ impl Lexer<'_> {
 				Ok(ReadTokenState::Token(Token {
 					kind: TokenKind::Separator,
 					start,
-					end: start,
+					end: self.current_pos,
 				}))
 			}
 			Some(c) if self.is_this_next("[-]") => {
@@ -441,7 +441,7 @@ impl Lexer<'_> {
 				Ok(ReadTokenState::Token(Token {
 					kind: TokenKind::Bracket(c),
 					start,
-					end: start,
+					end: self.current_pos,
 				}))
 			}
 			Some(c) if c.is_digit(10) || c == '.' => {
@@ -496,7 +496,7 @@ impl Lexer<'_> {
 				Ok(ReadTokenState::Token(Token {
 					kind: TokenKind::Declaration,
 					start,
-					end: start,
+					end: self.current_pos,
 				}))
 			}
 			Some('-') if self.is_this_next("->") => {

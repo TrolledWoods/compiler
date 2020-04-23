@@ -1,5 +1,5 @@
 pub const DO_DEBUGGING: bool = true;
-pub const DO_PANIC_ON_ERROR: bool = true;
+pub const DO_PANIC_ON_ERROR: bool = false;
 
 macro_rules! debug_err {
 	( $error:expr ) => {{

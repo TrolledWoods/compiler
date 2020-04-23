@@ -993,67 +993,6 @@ fn parse_named_or_unnamed_list<N, U>(
 	}
 }
 
-/// Parses a named list.
-/// The syntax of a named list is:
-/// name_1: [value],
-/// name_2: [value],
-/// [terminator].
-/// The terminator token will also
-/// be "eaten"
-fn parse_named_list<V>(
-	parser: &mut Parser,
-	grammar: ListGrammar,
-	mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
-	activity: ParsingActivity,
-) -> Result<(SourcePos, Vec<(Identifier, V)>), ParseError> {
-	let start = if let Some(start) = try_parse_kind(parser, &grammar.start)? {
-		start.start
-	} else {
-		return err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity,
-				expected: vec![ExpectedValue::Kind(grammar.start)],
-				got: parser.peek_token(0)?,
-			}
-		);
-	};
-
-	// Read the members
-	let mut members = Vec::new();
-	loop {
-		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
-			return Ok((
-				SourcePos {
-					file: parser.file,
-					start,
-					end: terminator.end,
-				},
-				members,
-			));
-		}
-
-		let name = parse_identifier(parser, activity)?;
-		let _colon = parse_kind(parser, &TokenKind::Declaration, activity)?;
-		let value = parse_value(parser)?;
-		members.push((name, value));
-
-		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
-			return Ok((
-				SourcePos {
-					file: parser.file,
-					start,
-					end: terminator.end,
-				},
-				members,
-			));
-		} else {
-			parse_kind(parser, &grammar.separator, activity)?;
-		}
-	}
-}
-
 pub struct ListGrammar {
 	pub start: TokenKind,
 	pub separator: TokenKind,
@@ -1117,22 +1056,11 @@ fn parse_list<V>(
 	mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
 	activity: ParsingActivity,
 ) -> Result<(SourcePos, Vec<V>), ParseError> {
-	let start = if let Some(start) = try_parse_kind(parser, &grammar.start)? {
-		start.start
-	} else {
-		return err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity,
-				expected: vec![ExpectedValue::Kind(grammar.start)],
-				got: parser.peek_token(0)?,
-			}
-		);
-	};
+	let start = parse_kind(parser, &grammar.start, activity)?.start;
 
 	let mut members = Vec::new();
 	loop {
+		// Check if the list ended
 		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
 			return Ok((
 				SourcePos {
@@ -1144,8 +1072,10 @@ fn parse_list<V>(
 			));
 		}
 
+		// Parse the member
 		members.push(parse_value(parser)?);
 
+		// Check for a separator / list end
 		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
 			return Ok((
 				SourcePos {

@@ -1,4 +1,19 @@
 const main = [] -> [] (
+	let x: f32 = 500.0 + "hi" * 50 % (
+		const other = 20;
+
+		let y = ("hi"; "yes"; "you");
+
+		y
+	);
+
+	x + y * (
+		"hello" * (
+			"hello" * (
+				"hello" * 3
+			)
+		)
+	) * 500
 );
 
 

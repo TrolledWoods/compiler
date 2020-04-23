@@ -1,4 +1,4 @@
-use crate::compilation_manager::Identifier;
+use crate::compilation_manager::{FunctionId, Identifier};
 use crate::lexer::{Literal, SourcePos};
 use crate::parser::ListKind;
 use crate::string_pile::TinyString;
@@ -38,14 +38,8 @@ impl ExpressionDef {
 					arg.get_dependencies(on_find_dep)?;
 				}
 			}
-			Function(args, returns, body) => {
-				for (_, type_def) in args {
-					type_def.get_unsized_dependencies(on_find_dep)?;
-				}
-				for type_def in returns {
-					type_def.get_unsized_dependencies(on_find_dep)?;
-				}
-				body.get_dependencies(on_find_dep)?;
+			Function(id) => {
+				println!("MAKE DEPENDENCIES SUPPORT COMPILATION UNIT ID:S TOO");
 			}
 			Array(members) => {
 				for member in members {
@@ -87,7 +81,7 @@ pub enum ExpressionDefKind {
 		function: Box<ExpressionDef>,
 		args: Vec<ExpressionDef>,
 	},
-	Function(Vec<(Identifier, TypeDef)>, Vec<TypeDef>, Box<ExpressionDef>),
+	Function(FunctionId),
 	Offload(TinyString),
 	Array(Vec<ExpressionDef>),
 	Collection(ListKind<ExpressionDef, ExpressionDef>),
@@ -174,23 +168,8 @@ impl ExpressionDefKind {
 					}
 				}
 			}
-			Function(args, returns, body) => {
-				print!("[");
-				for (i, (name, member)) in args.iter().enumerate() {
-					if i > 0 {
-						print!(", ");
-					}
-					print!("{}: {}", name.data, member);
-				}
-				print!("] -> [");
-				for (i, member) in returns.iter().enumerate() {
-					if i > 0 {
-						print!(", ");
-					}
-					print!("{}", member);
-				}
-				print!("] ");
-				body.pretty_print(indent);
+			Function(id) => {
+				println!("{:?}", id);
 			}
 			FunctionCall { function, args } => {
 				function.pretty_print(indent);

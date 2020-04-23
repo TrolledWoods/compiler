@@ -1,4 +1,8 @@
 const main = [] -> [] (
+	let tiny_function: [] -> [] = [](
+		x;
+	);
+
 	let x: f32 = 500.0 + "hi" * 50 % (
 		const other = 20;
 
@@ -11,7 +15,6 @@ x[][][][]["hi", "you", "suck" + 50 - (hi)][][{}];
 
 
 	{ x: 30, y: 50, z: 5000000 };
-	const test = [x: [000000] f32] ();
 
 	x + y * (
 		"hello" * (

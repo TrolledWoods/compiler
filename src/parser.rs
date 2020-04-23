@@ -393,8 +393,18 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 						.create_anonymous_namespace(id);
 					let content = parse_value(parser, sub_id)?;
 
+					let (names, args): (Vec<_>, Vec<_>) = args.into_iter().unzip();
+
+					let function_id = parser.manager.insert_function(
+						id,
+						list_pos.clone(),
+						names,
+						FunctionHeader { args, returns },
+						content,
+					);
+
 					Ok(ast::ExpressionDef {
-						kind: ast::ExpressionDefKind::Function(args, returns, Box::new(content)),
+						kind: ast::ExpressionDefKind::Function(function_id),
 						pos: list_pos,
 					})
 				}

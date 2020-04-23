@@ -290,13 +290,16 @@ pub fn size_type_def(
 			let (named_type_id, named_type) = match id {
 				CompilationUnitId::NamedType(named_type_id) => {
 					if named_type_id == recursion_guard {
-						unimplemented!("Recursion while sizing a type!");
+						unimplemented!("TODO: Recursion while sizing a type!");
 					}
 
 					(
 						named_type_id,
 						manager.named_types.get(named_type_id).unwrap(),
 					)
+				}
+				CompilationUnitId::Function(_) => {
+					panic!("TODO: A type cannot depend on a function!")
 				}
 			};
 

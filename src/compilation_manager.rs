@@ -1,3 +1,4 @@
+use crate::ast;
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::id::CIdMap;
 use crate::lexer::SourcePos;
@@ -6,7 +7,8 @@ use crate::namespace::{
 };
 use crate::string_pile::TinyString;
 use crate::types::{
-	self, NamedTypeId, ResolvedTypeDef, ResolvedTypeId, ResolvedTypeKind, TypeDef, TypeDefKind,
+	self, FunctionHeader, NamedTypeId, ResolvedTypeDef, ResolvedTypeId, ResolvedTypeKind, TypeDef,
+	TypeDefKind,
 };
 use chashmap::{ReadGuard, WriteGuard};
 use std::collections::{BTreeSet, HashMap};
@@ -127,6 +129,8 @@ pub struct CompileManager {
 	// to something better. Maybe a concurrent queue of some sort?
 	ready_to_compile: Mutex<Vec<CompilationUnitId>>,
 
+	pub functions: CIdMap<FunctionId, FunctionCompUnit>,
+
 	pub named_types: CIdMap<NamedTypeId, NamedTypeCompUnit>,
 	pub resolved_types: CIdMap<ResolvedTypeId, ResolvedTypeDef>,
 
@@ -142,6 +146,8 @@ impl CompileManager {
 			namespace_manager: NamespaceManager::new(),
 			ready_to_compile: Mutex::new(vec![]),
 
+			functions: CIdMap::new(),
+
 			named_types: CIdMap::new(),
 			resolved_types: CIdMap::new(),
 
@@ -152,7 +158,7 @@ impl CompileManager {
 	pub fn get_named_type_mut_or<'a, E>(
 		&'a self,
 		id: CompilationUnitId,
-		_err: impl FnOnce(CompUnitWindow<'a>) -> E,
+		err: impl FnOnce(CompUnitWindow<'_>) -> E,
 	) -> Result<(NamedTypeId, WriteGuard<'a, NamedTypeId, NamedTypeCompUnit>), E> {
 		match id {
 			CompilationUnitId::NamedType(named_id) => Ok((
@@ -161,20 +167,57 @@ impl CompileManager {
 					.get_mut(named_id)
 					.expect("Invalid NamedTypeId"),
 			)),
+			CompilationUnitId::Function(id) => {
+				let lock = self.functions.get(id).expect("Invalid FunctionId");
+				let window = lock.get_window();
+				let err = err(window);
+				Err(err)
+			}
 		}
 	}
 
 	pub fn get_named_type_or<'a, E>(
 		&'a self,
 		id: CompilationUnitId,
-		_err: impl FnOnce(CompUnitWindow<'a>) -> E,
+		err: impl FnOnce(CompUnitWindow<'_>) -> E,
 	) -> Result<(NamedTypeId, ReadGuard<'a, NamedTypeId, NamedTypeCompUnit>), E> {
 		match id {
 			CompilationUnitId::NamedType(named_id) => Ok((
 				named_id,
 				self.named_types.get(named_id).expect("Invalid NamedTypeId"),
 			)),
+			CompilationUnitId::Function(id) => {
+				let lock = self.functions.get(id).expect("Invalid FunctionId");
+				let window = lock.get_window();
+				let err = err(window);
+				Err(err)
+			}
 		}
+	}
+
+	pub fn insert_function(
+		&self,
+		namespace_id: NamespaceId,
+		pos: SourcePos,
+		names: Vec<Identifier>,
+		header: FunctionHeader<TypeDef>,
+		body: ast::ExpressionDef,
+	) -> FunctionId {
+		body.pretty_print(0);
+		let id = self.functions.insert(FunctionCompUnit {
+			pos,
+			dependencies: BTreeSet::new(),
+			header_names: names,
+			header,
+			body,
+			typed: CompUnitStage::unresolved(),
+			stage: FunctionStage::Defined,
+		});
+		self.add_ready_compilation_unit(CompilationUnitId::Function(id));
+
+		println!("Added function: {:?}", id);
+
+		id
 	}
 
 	pub fn insert_named_type(
@@ -214,8 +257,13 @@ impl CompileManager {
 	) -> Result<(), CompileManagerError> {
 		match id {
 			CompilationUnitId::NamedType(type_id) => self.advance_type(type_id)?,
+			CompilationUnitId::Function(id) => self.advance_function(id)?,
 		}
 
+		Ok(())
+	}
+
+	fn advance_function(&self, id: FunctionId) -> Result<(), CompileManagerError> {
 		Ok(())
 	}
 
@@ -332,6 +380,17 @@ impl CompileManager {
 					self.add_ready_compilation_unit(remove_from);
 				}
 			}
+			CompilationUnitId::Function(id) => {
+				let mut comp_unit = self.functions.get_mut(id).unwrap();
+				assert!(
+					comp_unit.dependencies.remove(&dependency),
+					"Cannot remove a dependency that doesn't exist"
+				);
+
+				if comp_unit.dependencies.len() == 0 {
+					self.add_ready_compilation_unit(remove_from);
+				}
+			}
 		}
 	}
 }
@@ -339,6 +398,60 @@ impl CompileManager {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum CompilationUnitId {
 	NamedType(NamedTypeId),
+	Function(FunctionId),
+}
+
+create_id!(FunctionId);
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum FunctionStage {
+	Poisoned,
+	Defined,
+	Typed,
+	DependantsDone,
+}
+
+pub struct FunctionCompUnit {
+	pub pos: SourcePos,
+	pub dependencies: BTreeSet<CompilationUnitId>,
+
+	pub header_names: Vec<Identifier>,
+	pub header: FunctionHeader<TypeDef>,
+	pub body: ast::ExpressionDef,
+
+	pub typed: CompUnitStage<FunctionHeader<ResolvedTypeId>>,
+	// pub bytecode: CompUnitStage<Vec<InterInstruction>>,
+	pub stage: FunctionStage,
+}
+
+impl CompUnit for FunctionCompUnit {
+	type Stage = FunctionStage;
+
+	fn get_window_mut<'a>(&'a mut self) -> CompUnitWindowMut<'a> {
+		CompUnitWindowMut {
+			pos: self.pos.clone(),
+			dependencies: &mut self.dependencies,
+		}
+	}
+
+	fn get_window<'a>(&'a self) -> CompUnitWindow<'a> {
+		CompUnitWindow {
+			pos: self.pos.clone(),
+			dependencies: &self.dependencies,
+		}
+	}
+
+	fn get_stage_dependants_mut<'a>(
+		&'a mut self,
+		stage: Self::Stage,
+	) -> Option<&'a mut BTreeSet<CompilationUnitId>> {
+		match stage {
+			FunctionStage::Poisoned => None,
+			FunctionStage::Defined => None,
+			FunctionStage::Typed => self.typed.get_dependants_mut(),
+			FunctionStage::DependantsDone => None,
+		}
+	}
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
@@ -367,7 +480,6 @@ impl CompUnit for NamedTypeCompUnit {
 	fn get_window_mut<'a>(&'a mut self) -> CompUnitWindowMut<'a> {
 		CompUnitWindowMut {
 			pos: self.definition.pos.clone(),
-			location: self.location,
 			dependencies: &mut self.dependencies,
 		}
 	}
@@ -375,7 +487,6 @@ impl CompUnit for NamedTypeCompUnit {
 	fn get_window<'a>(&'a self) -> CompUnitWindow<'a> {
 		CompUnitWindow {
 			pos: self.definition.pos.clone(),
-			location: self.location,
 			dependencies: &self.dependencies,
 		}
 	}
@@ -451,13 +562,11 @@ pub trait CompUnit {
 
 pub struct CompUnitWindow<'a> {
 	pub pos: SourcePos,
-	pub location: NamespaceId,
 	pub dependencies: &'a BTreeSet<CompilationUnitId>,
 }
 
 pub struct CompUnitWindowMut<'a> {
 	pub pos: SourcePos,
-	pub location: NamespaceId,
 	pub dependencies: &'a mut BTreeSet<CompilationUnitId>,
 }
 

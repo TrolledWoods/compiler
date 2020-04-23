@@ -1,5 +1,5 @@
 use crate::compilation_manager::Identifier;
-use crate::lexer::SourcePos;
+use crate::lexer::{Literal, SourcePos};
 use crate::parser::ListKind;
 use crate::string_pile::TinyString;
 use crate::types::TypeDef;
@@ -71,7 +71,7 @@ impl ExpressionDef {
 					pos: self.pos.clone(),
 				})?;
 			}
-			StringLiteral(_) | IntLiteral(_) | FloatLiteral(_) => (),
+			Literal(_) => (),
 			Block(_, _) => unimplemented!(),
 		}
 
@@ -92,9 +92,7 @@ pub enum ExpressionDefKind {
 	Array(Vec<ExpressionDef>),
 	Collection(ListKind<ExpressionDef, ExpressionDef>),
 
-	StringLiteral(TinyString),
-	IntLiteral(i128),
-	FloatLiteral(f64),
+	Literal(Literal),
 	Block(Vec<StatementDef>, Option<Box<ExpressionDef>>),
 }
 
@@ -150,9 +148,7 @@ impl ExpressionDefKind {
 					print!("{}", '}');
 				}
 			},
-			StringLiteral(content) => print!("\"{}\"", content),
-			IntLiteral(content) => print!("{}", content),
-			FloatLiteral(content) => print!("{}", content),
+			Literal(content) => print!("{}", content),
 			Block(statements, expression) => {
 				if statements.len() > 0 {
 					println!("(");

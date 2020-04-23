@@ -2,7 +2,7 @@ use crate::ast;
 use crate::compilation_manager::{CompileManager, Dependencies, Identifier};
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
-use crate::lexer::{BracketKind, Lexer, LexerError, SourcePos, TextPos, Token, TokenKind};
+use crate::lexer::{BracketKind, Lexer, LexerError, Literal, SourcePos, TextPos, Token, TokenKind};
 use crate::namespace::{NamespaceError, NamespaceId};
 use crate::operator;
 use crate::string_pile::TinyString;
@@ -311,6 +311,7 @@ fn parse_expression_rec(
 
 fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::ExpressionDef, ParseError> {
 	let value: Result<ast::ExpressionDef, ParseError> = match parser.peek_token(0)? {
+		// A block
 		Some(Token {
 			kind: TokenKind::OpeningBracket(BracketKind::Paren),
 			start,
@@ -323,12 +324,11 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 
 			let (statements, expression) = parse_block(parser, sub_namespace_id)?;
 
-			// If the block was just used to encapsulate an expression,
-			// don't make a block node. Otherwise we do! This is a small
-			// optimization, but easy to do so whatever. May also
-			// decrease compilation times
 			match (statements.as_slice(), expression) {
+				// No statements, so the block was only used for order of operations
 				([], Some(expression)) => Ok(expression),
+
+				// Statements exist, so we need a full block node
 				(_, expression) => Ok(ast::ExpressionDef {
 					pos: source_pos(parser, start, end),
 					kind: ast::ExpressionDefKind::Block(
@@ -338,12 +338,12 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				}),
 			}
 		}
+		// Either a function definition or an array definition.
 		Some(Token {
 			kind: TokenKind::OpeningBracket(BracketKind::Brack),
 			start,
 			end,
 		}) => {
-			// Either a function definition or an array definition.
 			// We say it's a function if there is a '->' or a block after
 			// the first brackets. I might change this later, for now though,
 			// doing "[] ()" or "[] -> [] ()" for all functions is recommended.
@@ -410,6 +410,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				}
 			}
 		}
+		// A collection
 		Some(Token {
 			kind: TokenKind::OpeningBracket(BracketKind::Curly),
 			start,
@@ -429,6 +430,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				kind: ast::ExpressionDefKind::Collection(list),
 			})
 		}
+		// A unary operator(normal operators are dealt with by the "parse_expression" function
 		Some(Token {
 			kind: TokenKind::Operator(op),
 			start,
@@ -441,37 +443,16 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				kind: ast::ExpressionDefKind::UnaryOperator(op, Box::new(arg)),
 			})
 		}
+		// Literals
 		Some(Token {
-			kind: TokenKind::IntLiteral(value),
+			kind: TokenKind::Literal(value),
 			start,
 			end,
 		}) => {
 			parser.eat_token()?;
 			Ok(ast::ExpressionDef {
 				pos: source_pos(parser, start, end),
-				kind: ast::ExpressionDefKind::IntLiteral(value),
-			})
-		}
-		Some(Token {
-			kind: TokenKind::FloatLiteral(value),
-			start,
-			end,
-		}) => {
-			parser.eat_token()?;
-			Ok(ast::ExpressionDef {
-				pos: source_pos(parser, start, end),
-				kind: ast::ExpressionDefKind::FloatLiteral(value),
-			})
-		}
-		Some(Token {
-			kind: TokenKind::StringLiteral(value),
-			start,
-			end,
-		}) => {
-			parser.eat_token()?;
-			Ok(ast::ExpressionDef {
-				pos: source_pos(parser, start, end),
-				kind: ast::ExpressionDefKind::StringLiteral(value),
+				kind: ast::ExpressionDefKind::Literal(value),
 			})
 		}
 		Some(Token {
@@ -1051,7 +1032,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		}) => {
 			match parser.peek_token(1)? {
 				Some(Token {
-					kind: TokenKind::IntLiteral(count),
+					kind: TokenKind::Literal(Literal::Int(count)),
 					end,
 					..
 				}) => {

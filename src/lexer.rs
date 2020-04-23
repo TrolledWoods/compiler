@@ -2,6 +2,7 @@ use crate::error::{CompileError, ErrorPrintingData};
 use crate::keyword::Keyword;
 use crate::string_pile::TinyString;
 use std::collections::VecDeque;
+use std::fmt::{self, Display, Formatter};
 use std::str::Chars;
 
 #[derive(Clone, Debug)]
@@ -9,6 +10,24 @@ pub struct Token {
 	pub kind: TokenKind,
 	pub start: TextPos,
 	pub end: TextPos,
+}
+
+// TODO: Make int and float literals dynamic size
+#[derive(Clone, Debug, PartialEq)]
+pub enum Literal {
+	String(TinyString),
+	Int(i128),
+	Float(f64),
+}
+
+impl Display for Literal {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Literal::String(string) => write!(f, "\"{}\"", string),
+			Literal::Int(num) => write!(f, "{}", num),
+			Literal::Float(num) => write!(f, "{}", num),
+		}
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,9 +44,7 @@ pub enum TokenKind {
 	Operator(&'static str),
 	AssignmentOperator(&'static str),
 	Keyword(Keyword),
-	StringLiteral(TinyString),
-	IntLiteral(i128), // Store literals with the highest precision, as we can always scale down but not scale up later
-	FloatLiteral(f64),
+	Literal(Literal),
 }
 
 #[derive(Clone, Debug)]
@@ -513,15 +530,15 @@ impl Lexer<'_> {
 
 				if let Some(decimal_point) = decimal_point {
 					Ok(ReadTokenState::Token(Token {
-						kind: TokenKind::FloatLiteral(
+						kind: TokenKind::Literal(Literal::Float(
 							num as f64 * (0.1f64).powf(decimal_point as f64),
-						),
+						)),
 						start: start,
 						end: self.current_pos,
 					}))
 				} else {
 					Ok(ReadTokenState::Token(Token {
-						kind: TokenKind::IntLiteral(num),
+						kind: TokenKind::Literal(Literal::Int(num)),
 						start: start,
 						end: self.current_pos,
 					}))
@@ -627,7 +644,7 @@ impl Lexer<'_> {
 				self.next_char();
 
 				Ok(ReadTokenState::Token(Token {
-					kind: TokenKind::StringLiteral(string.into()),
+					kind: TokenKind::Literal(Literal::String(string.into())),
 					start: start,
 					end: self.current_pos,
 				}))

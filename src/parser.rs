@@ -398,11 +398,11 @@ fn parse_non_func_call_value(
 			// Array type: [] i32
 			// Function type: [i32] -> []
 
-			let (list_pos, list) = parse_unique_named_or_unnamed_list(
+			let (list_pos, list) = parse_named_or_unnamed_list(
 				parser,
 				ListGrammar::square(),
 				|parser| parse_expression(parser, id),
-				|parser| parse_type(parser),
+				parse_type,
 				ParsingActivity::Block,
 			)?;
 
@@ -412,9 +412,9 @@ fn parse_non_func_call_value(
 					..
 				}) => {
 					let args = match list {
-						UniqueListKind::Empty => vec![],
-						UniqueListKind::Named(elements) => elements,
-						UniqueListKind::Unnamed(_) => {
+						ListKind::Empty => vec![],
+						ListKind::Named(elements) => elements,
+						ListKind::Unnamed(_) => {
 							panic!("TODO: Function definition without arg names")
 						}
 					};
@@ -446,9 +446,9 @@ fn parse_non_func_call_value(
 					..
 				}) => {
 					let args = match list {
-						UniqueListKind::Empty => vec![],
-						UniqueListKind::Named(elements) => elements,
-						UniqueListKind::Unnamed(_) => {
+						ListKind::Empty => vec![],
+						ListKind::Named(elements) => elements,
+						ListKind::Unnamed(_) => {
 							panic!("TODO: Function definition without arg names")
 						}
 					};
@@ -467,9 +467,9 @@ fn parse_non_func_call_value(
 				}
 				_ => {
 					let members = match list {
-						UniqueListKind::Empty => vec![],
-						UniqueListKind::Unnamed(elements) => elements,
-						UniqueListKind::Named(_) => {
+						ListKind::Empty => vec![],
+						ListKind::Unnamed(elements) => elements,
+						ListKind::Named(_) => {
 							panic!("TODO: Array definition with arg names is not allowed")
 						}
 					};
@@ -491,6 +491,7 @@ fn parse_non_func_call_value(
 			let (list_pos, list) = parse_named_or_unnamed_list(
 				parser,
 				ListGrammar::curly(),
+				|parser| parse_expression(parser, id),
 				|parser| parse_expression(parser, id),
 				ParsingActivity::Block,
 			)?;
@@ -854,24 +855,22 @@ pub fn parse_type_def(
 	Ok(())
 }
 
-type ListKind<V> = UniqueListKind<V, V>;
-
-enum UniqueListKind<N, U> {
+pub enum ListKind<N, U> {
 	Empty,
 	Named(Vec<(Identifier, N)>),
 	Unnamed(Vec<U>),
 }
 
-fn parse_unique_named_or_unnamed_list<N, U>(
+fn parse_named_or_unnamed_list<N, U>(
 	parser: &mut Parser,
 	grammar: ListGrammar,
 	mut parse_unnamed_value: impl FnMut(&mut Parser) -> Result<U, ParseError>,
 	mut parse_named_value: impl FnMut(&mut Parser) -> Result<N, ParseError>,
 	activity: ParsingActivity,
-) -> Result<(SourcePos, UniqueListKind<N, U>), ParseError> {
+) -> Result<(SourcePos, ListKind<N, U>), ParseError> {
 	let start = parse_kind(parser, &grammar.start, activity)?.start;
 
-	let mut values = UniqueListKind::Empty;
+	let mut values = ListKind::Empty;
 	loop {
 		match (parser.peek_token(0)?, parser.peek_token(1)?) {
 			(Some(Token { kind, end, .. }), _) if kind == grammar.end => {
@@ -898,11 +897,11 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 				}),
 			) => {
 				// This is a named entry, because of the "name: " structure
-				let owned_values = std::mem::replace(&mut values, UniqueListKind::Empty);
+				let owned_values = std::mem::replace(&mut values, ListKind::Empty);
 				let mut members = match owned_values {
-					UniqueListKind::Empty => vec![],
-					UniqueListKind::Named(members) => members,
-					UniqueListKind::Unnamed(_) => {
+					ListKind::Empty => vec![],
+					ListKind::Named(members) => members,
+					ListKind::Unnamed(_) => {
 						return err!(
 							parser,
 							UnexpectedTokenError {
@@ -931,16 +930,16 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 					value,
 				));
 
-				values = UniqueListKind::Named(members);
+				values = ListKind::Named(members);
 			}
 			_ => {
 				// This is an unnamed entry, because it doesn't have the "name: "
 				// structure
-				let owned_values = std::mem::replace(&mut values, UniqueListKind::Empty);
+				let owned_values = std::mem::replace(&mut values, ListKind::Empty);
 				let mut members = match owned_values {
-					UniqueListKind::Empty => vec![],
-					UniqueListKind::Unnamed(members) => members,
-					UniqueListKind::Named(_) => {
+					ListKind::Empty => vec![],
+					ListKind::Unnamed(members) => members,
+					ListKind::Named(_) => {
 						return err!(
 							parser,
 							UnexpectedTokenError {
@@ -956,7 +955,7 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 				let value = parse_unnamed_value(parser)?;
 				members.push(value);
 
-				values = UniqueListKind::Unnamed(members);
+				values = ListKind::Unnamed(members);
 			}
 		}
 
@@ -991,56 +990,6 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 				);
 			}
 		}
-	}
-}
-
-fn parse_named_or_unnamed_list<V>(
-	parser: &mut Parser,
-	grammar: ListGrammar,
-	mut parse_value: impl FnMut(&mut Parser) -> Result<V, ParseError>,
-	activity: ParsingActivity,
-) -> Result<(SourcePos, ListKind<V>), ParseError> {
-	let start = match parser.peek_token(0)? {
-		Some(Token { kind, start, .. }) if kind == grammar.start => start,
-		_ => {
-			return err!(
-				parser,
-				UnexpectedTokenError {
-					file: parser.file,
-					activity,
-					expected: vec![ExpectedValue::Kind(grammar.start)],
-					got: parser.peek_token(0)?,
-				}
-			);
-		}
-	};
-
-	// Determine wether it is named or not
-	if let Some(Token {
-		kind: TokenKind::Terminator,
-		..
-	}) = parser.peek_token(1)?
-	{
-		parser.eat_token()?;
-		let terminator = parser.eat_token()?.unwrap();
-		Ok((
-			SourcePos {
-				file: parser.file,
-				start,
-				end: terminator.end,
-			},
-			ListKind::Empty,
-		))
-	} else if let Some(Token {
-		kind: TokenKind::Declaration,
-		..
-	}) = parser.peek_token(2)?
-	{
-		parse_named_list(parser, grammar, parse_value, activity)
-			.map(|(pos, list)| (pos, ListKind::Named(list)))
-	} else {
-		parse_list(parser, grammar, parse_value, activity)
-			.map(|(pos, list)| (pos, ListKind::Unnamed(list)))
 	}
 }
 
@@ -1216,7 +1165,8 @@ fn parse_collection(parser: &mut Parser) -> Result<(SourcePos, CollectionDefKind
 	let (pos, members) = parse_named_or_unnamed_list(
 		parser,
 		ListGrammar::curly(),
-		|parser| parse_type(parser),
+		parse_type,
+		parse_type,
 		ParsingActivity::StructMember,
 	)?;
 

@@ -8,7 +8,7 @@ use crate::operator;
 use crate::string_pile::TinyString;
 use crate::types::{CollectionDefKind, FunctionHeader, PrimitiveKind, TypeDef, TypeDefKind};
 use std::convert::TryInto;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -424,26 +424,10 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				ParsingActivity::Block,
 			)?;
 
-			match list {
-				ListKind::Empty => Ok(ast::ExpressionDef {
-					pos: list_pos,
-					kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
-						vec![],
-					)),
-				}),
-				ListKind::Named(members) => Ok(ast::ExpressionDef {
-					pos: list_pos,
-					kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Named(
-						members,
-					)),
-				}),
-				ListKind::Unnamed(members) => Ok(ast::ExpressionDef {
-					pos: list_pos,
-					kind: ast::ExpressionDefKind::Collection(ast::CollectionDefKind::Unnamed(
-						members,
-					)),
-				}),
-			}
+			Ok(ast::ExpressionDef {
+				pos: list_pos,
+				kind: ast::ExpressionDefKind::Collection(list),
+			})
 		}
 		Some(Token {
 			kind: TokenKind::Operator(op),
@@ -779,6 +763,36 @@ pub enum ListKind<N, U> {
 	Empty,
 	Named(Vec<(Identifier, N)>),
 	Unnamed(Vec<U>),
+}
+
+impl<N: Debug, U: Debug> Debug for ListKind<N, U> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			ListKind::Empty => write!(f, "{}", "{}"),
+			ListKind::Named(members) => {
+				write!(f, "{}", "{")?;
+				for (i, (name, member)) in members.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "{}: {:?}", name.data, member)?;
+				}
+				write!(f, "{}", "}")?;
+				Ok(())
+			}
+			ListKind::Unnamed(members) => {
+				write!(f, "{}", "{")?;
+				for (i, member) in members.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "{:?}", member)?;
+				}
+				write!(f, "{}", "}")?;
+				Ok(())
+			}
+		}
+	}
 }
 
 impl<N, U> ListKind<N, U> {

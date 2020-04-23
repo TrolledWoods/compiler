@@ -1,5 +1,6 @@
 use crate::compilation_manager::Identifier;
 use crate::lexer::SourcePos;
+use crate::parser::ListKind;
 use crate::string_pile::TinyString;
 use crate::types::TypeDef;
 
@@ -52,12 +53,13 @@ impl ExpressionDef {
 				}
 			}
 			Collection(kind) => match kind {
-				CollectionDefKind::Named(members) => {
+				ListKind::Empty => (),
+				ListKind::Named(members) => {
 					for (_, member) in members {
 						member.get_dependencies(on_find_dep)?;
 					}
 				}
-				CollectionDefKind::Unnamed(members) => {
+				ListKind::Unnamed(members) => {
 					for member in members {
 						member.get_dependencies(on_find_dep)?;
 					}
@@ -78,12 +80,6 @@ impl ExpressionDef {
 }
 
 #[derive(Debug)]
-pub enum CollectionDefKind {
-	Named(Vec<(Identifier, ExpressionDef)>),
-	Unnamed(Vec<ExpressionDef>),
-}
-
-#[derive(Debug)]
 pub enum ExpressionDefKind {
 	Operator(&'static str, Vec<ExpressionDef>),
 	UnaryOperator(&'static str, Box<ExpressionDef>),
@@ -94,7 +90,7 @@ pub enum ExpressionDefKind {
 	Function(Vec<(Identifier, TypeDef)>, Vec<TypeDef>, Box<ExpressionDef>),
 	Offload(TinyString),
 	Array(Vec<ExpressionDef>),
-	Collection(CollectionDefKind),
+	Collection(ListKind<ExpressionDef, ExpressionDef>),
 
 	StringLiteral(TinyString),
 	IntLiteral(i128),
@@ -129,7 +125,10 @@ impl ExpressionDefKind {
 				print!("]");
 			}
 			Collection(kind) => match kind {
-				CollectionDefKind::Named(members) => {
+				ListKind::Empty => {
+					println!("{}", "{}");
+				}
+				ListKind::Named(members) => {
 					println!("{}", '{');
 					for (name, member) in members {
 						print_indent(indent + 1);
@@ -140,7 +139,7 @@ impl ExpressionDefKind {
 					print_indent(indent);
 					print!("{}", '}');
 				}
-				CollectionDefKind::Unnamed(members) => {
+				ListKind::Unnamed(members) => {
 					println!("{}", '{');
 					for member in members {
 						print_indent(indent + 1);

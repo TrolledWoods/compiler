@@ -326,24 +326,19 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 
 			let (statements, expression) = parse_block(parser, sub_namespace_id)?;
 
-			if statements.len() == 0 {
-				if let Some(expression) = expression {
-					Ok(expression)
-				} else {
-					// An empty block ;D
-					Ok(ast::ExpressionDef {
-						pos: source_pos(parser, start, end),
-						kind: ast::ExpressionDefKind::Block(vec![], None),
-					})
-				}
-			} else {
-				Ok(ast::ExpressionDef {
+			// If the block was just used to encapsulate an expression,
+			// don't make a block node. Otherwise we do! This is a small
+			// optimization, but easy to do so whatever. May also
+			// decrease compilation times
+			match (statements.as_slice(), expression) {
+				([], Some(expression)) => Ok(expression),
+				(_, expression) => Ok(ast::ExpressionDef {
 					pos: source_pos(parser, start, end),
 					kind: ast::ExpressionDefKind::Block(
 						statements,
 						expression.map(|v| Box::new(v)),
 					),
-				})
+				}),
 			}
 		}
 		Some(Token {
@@ -351,9 +346,10 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 			start,
 			end,
 		}) => {
-			// Array type: [] i32
-			// Function type: [i32] -> []
-
+			// Either a function definition or an array definition.
+			// We say it's a function if there is a '->' or a block after
+			// the first brackets. I might change this later, for now though,
+			// doing "[] ()" or "[] -> [] ()" for all functions is recommended.
 			let (list_pos, list) = parse_named_or_unnamed_list(
 				parser,
 				ListGrammar::square(),
@@ -362,11 +358,17 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				ParsingActivity::Block,
 			)?;
 
+			// Decide if it's an array or a function
 			match parser.peek_token(0)? {
 				Some(Token {
 					kind: TokenKind::ReturnArrow,
 					..
+				})
+				| Some(Token {
+					kind: TokenKind::OpeningBracket(BracketKind::Paren),
+					..
 				}) => {
+					// A function definition!
 					let args = match list {
 						ListKind::Empty => vec![],
 						ListKind::Named(elements) => elements,
@@ -375,17 +377,22 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 						}
 					};
 
-					parser.eat_token()?;
-
 					// Parse return args
-					let (return_pos, returns) = parse_list(
-						parser,
-						ListGrammar::square(),
-						|parser| parse_type(parser),
-						ParsingActivity::Block,
-					)?;
+					let returns = if let Some(_) = try_parse_kind(parser, &TokenKind::ReturnArrow)?
+					{
+						let (_, returns) = parse_list(
+							parser,
+							ListGrammar::square(),
+							|parser| parse_type(parser),
+							ParsingActivity::Block,
+						)?;
 
-					// Parse function body
+						returns
+					} else {
+						vec![]
+					};
+
+					// Parse body
 					let sub_id = parser
 						.manager
 						.namespace_manager
@@ -397,31 +404,8 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 						pos: list_pos,
 					})
 				}
-				Some(Token {
-					kind: TokenKind::OpeningBracket(BracketKind::Paren),
-					..
-				}) => {
-					let args = match list {
-						ListKind::Empty => vec![],
-						ListKind::Named(elements) => elements,
-						ListKind::Unnamed(_) => {
-							panic!("TODO: Function definition without arg names")
-						}
-					};
-
-					// Function without return args
-					let sub_id = parser
-						.manager
-						.namespace_manager
-						.create_anonymous_namespace(id);
-					let content = parse_value(parser, sub_id)?;
-
-					Ok(ast::ExpressionDef {
-						kind: ast::ExpressionDefKind::Function(args, vec![], Box::new(content)),
-						pos: list_pos,
-					})
-				}
 				_ => {
+					// An array
 					let members = match list {
 						ListKind::Empty => vec![],
 						ListKind::Unnamed(elements) => elements,
@@ -429,8 +413,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 							panic!("TODO: Array definition with arg names is not allowed")
 						}
 					};
-					//
-					// This is an array
+
 					Ok(ast::ExpressionDef {
 						kind: ast::ExpressionDefKind::Array(members),
 						pos: list_pos,

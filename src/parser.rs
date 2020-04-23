@@ -366,13 +366,9 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 					..
 				}) => {
 					// A function definition!
-					let args = match list {
-						ListKind::Empty => vec![],
-						ListKind::Named(elements) => elements,
-						ListKind::Unnamed(_) => {
-							panic!("TODO: Function definition without arg names")
-						}
-					};
+					let args = list
+						.into_named()
+						.expect("TODO: Function arg list has to be named");
 
 					// Parse return args
 					let returns = if let Some(_) = try_parse_kind(parser, &TokenKind::ReturnArrow)?
@@ -403,13 +399,9 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				}
 				_ => {
 					// An array
-					let members = match list {
-						ListKind::Empty => vec![],
-						ListKind::Unnamed(elements) => elements,
-						ListKind::Named(_) => {
-							panic!("TODO: Array definition with arg names is not allowed")
-						}
-					};
+					let members = list
+						.into_unnamed()
+						.expect("Array cannot have named members");
 
 					Ok(ast::ExpressionDef {
 						kind: ast::ExpressionDefKind::Array(members),
@@ -789,6 +781,24 @@ pub enum ListKind<N, U> {
 	Unnamed(Vec<U>),
 }
 
+impl<N, U> ListKind<N, U> {
+	pub fn into_named(self) -> Option<Vec<(Identifier, N)>> {
+		match self {
+			ListKind::Empty => Some(vec![]),
+			ListKind::Named(elements) => Some(elements),
+			ListKind::Unnamed(_) => None,
+		}
+	}
+
+	pub fn into_unnamed(self) -> Option<Vec<U>> {
+		match self {
+			ListKind::Empty => Some(vec![]),
+			ListKind::Named(_) => None,
+			ListKind::Unnamed(elements) => Some(elements),
+		}
+	}
+}
+
 fn parse_named_or_unnamed_list<N, U>(
 	parser: &mut Parser,
 	grammar: ListGrammar,
@@ -819,18 +829,14 @@ fn parse_named_or_unnamed_list<N, U>(
 			) => {
 				// This is a named entry, because of the "name: " structure
 				let owned_values = std::mem::replace(&mut values, ListKind::Empty);
-				let mut members = match owned_values {
-					ListKind::Empty => vec![],
-					ListKind::Named(members) => members,
-					ListKind::Unnamed(_) => {
-						return debug_err!(UnexpectedTokenError {
-							file: parser.file,
-							activity: activity,
-							expected: vec![ExpectedValue::UnnamedListEntry],
-							got: parser.peek_token(0)?,
-						})
-					}
-				};
+				let mut members = owned_values.into_named().ok_or_else(|| {
+					err!(UnexpectedTokenError {
+						file: parser.file,
+						activity: activity,
+						expected: vec![ExpectedValue::NamedListEntry],
+						got: parser.peek_token(0).unwrap(),
+					})
+				})?;
 
 				parser.eat_token()?;
 				parser.eat_token()?;
@@ -850,18 +856,14 @@ fn parse_named_or_unnamed_list<N, U>(
 				// This is an unnamed entry, because it doesn't have the "name: "
 				// structure
 				let owned_values = std::mem::replace(&mut values, ListKind::Empty);
-				let mut members = match owned_values {
-					ListKind::Empty => vec![],
-					ListKind::Unnamed(members) => members,
-					ListKind::Named(_) => {
-						return debug_err!(UnexpectedTokenError {
-							file: parser.file,
-							activity: activity,
-							expected: vec![ExpectedValue::NamedListEntry],
-							got: parser.peek_token(0)?,
-						})
-					}
-				};
+				let mut members = owned_values.into_unnamed().ok_or_else(|| {
+					err!(UnexpectedTokenError {
+						file: parser.file,
+						activity: activity,
+						expected: vec![ExpectedValue::UnnamedListEntry],
+						got: parser.peek_token(0).unwrap(),
+					})
+				})?;
 
 				let value = parse_unnamed_value(parser)?;
 				members.push(value);

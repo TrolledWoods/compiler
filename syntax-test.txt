@@ -1,5 +1,4 @@
-const main = [] (
-	stdout[].print["Hello world!\n"];
+const main = [] -> [] (
 );
 
 

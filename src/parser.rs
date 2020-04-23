@@ -158,6 +158,9 @@ pub enum ExpectedValue {
 	Keyword(Keyword),
 	ClosingBracket(BracketKind),
 	OpeningBracket(BracketKind),
+
+	UnnamedListEntry,
+	NamedListEntry,
 }
 
 impl Display for ExpectedValue {
@@ -173,6 +176,8 @@ impl Display for ExpectedValue {
 			Keyword(keyword) => write!(f, "keyword '{:?}'", keyword),
 			ClosingBracket(kind) => write!(f, "closing {:?}", kind),
 			OpeningBracket(kind) => write!(f, "opening {:?}", kind),
+			UnnamedListEntry => write!(f, "unnamed list entry"),
+			NamedListEntry => write!(f, "named list entry"),
 		}
 	}
 }
@@ -846,43 +851,118 @@ fn parse_unique_named_or_unnamed_list<N, U>(
 	mut parse_named_value: impl FnMut(&mut Parser) -> Result<N, ParseError>,
 	activity: ParsingActivity,
 ) -> Result<(SourcePos, UniqueListKind<N, U>), ParseError> {
-	let start = match parser.peek_token(0)? {
-		Some(Token { kind, start, .. }) if kind == grammar.start => start,
-		_ => {
-			return Err(UnexpectedTokenError {
-				file: parser.file,
-				activity,
-				expected: vec![ExpectedValue::Kind(grammar.start)],
-				got: parser.peek_token(0)?,
-			}
-			.into())
-		}
-	};
+	let start = parse_kind(parser, &grammar.start, activity)?.start;
 
-	// Determine wether it is named or not
-	match (parser.peek_token(1)?, parser.peek_token(2)?) {
-		(Some(Token { kind, .. }), _) if kind == grammar.end => {
-			parser.eat_token()?;
-			let terminator = parser.eat_token()?.unwrap();
-			Ok((
-				SourcePos {
-					file: parser.file,
+	let mut values = UniqueListKind::Empty;
+	loop {
+		match (parser.peek_token(0)?, parser.peek_token(1)?) {
+			(Some(Token { kind, end, .. }), _) if kind == grammar.end => {
+				// This is the end of the list
+				return Ok((
+					SourcePos {
+						file: parser.file,
+						start,
+						end,
+					},
+					values,
+				));
+			}
+			(
+				Some(Token {
+					kind: TokenKind::Identifier(name),
 					start,
-					end: terminator.end,
-				},
-				UniqueListKind::Empty,
-			))
+					end,
+				}),
+				Some(Token {
+					kind: TokenKind::Declaration,
+					..
+				}),
+			) => {
+				// This is a named entry, because of the "name: " structure
+				let owned_values = std::mem::replace(&mut values, UniqueListKind::Empty);
+				let mut members = match owned_values {
+					UniqueListKind::Empty => vec![],
+					UniqueListKind::Named(members) => members,
+					UniqueListKind::Unnamed(_) => {
+						return Err(UnexpectedTokenError {
+							file: parser.file,
+							activity: activity,
+							expected: vec![ExpectedValue::UnnamedListEntry],
+							got: parser.peek_token(0)?,
+						}
+						.into())
+					}
+				};
+
+				parser.eat_token()?;
+				parser.eat_token()?;
+
+				let value = parse_named_value(parser)?;
+				members.push((
+					Identifier {
+						data: name,
+						pos: SourcePos {
+							file: parser.file,
+							start,
+							end,
+						},
+					},
+					value,
+				));
+
+				values = UniqueListKind::Named(members);
+			}
+			_ => {
+				// This is an unnamed entry, because it doesn't have the "name: "
+				// structure
+				let owned_values = std::mem::replace(&mut values, UniqueListKind::Empty);
+				let mut members = match owned_values {
+					UniqueListKind::Empty => vec![],
+					UniqueListKind::Unnamed(members) => members,
+					UniqueListKind::Named(_) => {
+						return Err(UnexpectedTokenError {
+							file: parser.file,
+							activity: activity,
+							expected: vec![ExpectedValue::NamedListEntry],
+							got: parser.peek_token(0)?,
+						}
+						.into())
+					}
+				};
+
+				let value = parse_unnamed_value(parser)?;
+				members.push(value);
+
+				values = UniqueListKind::Unnamed(members);
+			}
 		}
-		(
-			_,
-			Some(Token {
-				kind: TokenKind::Declaration,
-				..
-			}),
-		) => parse_named_list(parser, grammar, parse_named_value, activity)
-			.map(|(pos, list)| (pos, UniqueListKind::Named(list))),
-		(_, _) => parse_list(parser, grammar, parse_unnamed_value, activity)
-			.map(|(pos, list)| (pos, UniqueListKind::Unnamed(list))),
+
+		// Parse a separator or a terminator
+		match parser.eat_token()? {
+			Some(Token { kind, end, .. }) if kind == grammar.end => {
+				return Ok((
+					SourcePos {
+						file: parser.file,
+						start,
+						end,
+					},
+					values,
+				));
+			}
+			Some(Token { kind, end, .. }) if kind == grammar.separator => (),
+			c => {
+				return Err(UnexpectedTokenError {
+					file: parser.file,
+					activity,
+					expected: vec![
+						ExpectedValue::Kind(grammar.end),
+						ExpectedValue::Kind(grammar.separator),
+					],
+					got: c,
+				}
+				.into())
+			}
+		}
 	}
 }
 

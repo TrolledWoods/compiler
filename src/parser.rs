@@ -610,43 +610,6 @@ fn parse_block(
 				parser.eat_token()?;
 				return Ok((statements, None));
 			}
-			/* Token {
-				kind: TokenKind::OpeningBracket(BracketKind::Paren),
-				start,
-				end,
-			} => {
-				let anonymous = parser
-					.manager
-					.namespace_manager
-					.create_anonymous_namespace(id);
-
-				let (block_statements, expression) = parse_block(parser, anonymous)?;
-
-				if let Some(expression) = expression {
-					parse_kind(
-						parser,
-						&TokenKind::ClosingBracket(BracketKind::Paren),
-						ParsingActivity::Block,
-					)?;
-
-					return Ok((
-						statements,
-						Some(ast::ExpressionDef {
-							pos: SourcePos {
-								file: parser.file,
-								start,
-								end,
-							},
-							kind: ast::ExpressionDefKind::Block(
-								block_statements,
-								Some(Box::new(expression)),
-							),
-						}),
-					));
-				} else {
-					statements.push(ast::StatementDef::Block(block_statements));
-				}
-			} */
 			Token {
 				kind: TokenKind::Keyword(Keyword::Let),
 				start,
@@ -655,6 +618,13 @@ fn parse_block(
 				parser.eat_token()?;
 
 				let name = parse_identifier(parser, ParsingActivity::Let)?;
+
+				let type_ =
+					if let Some(declaration) = try_parse_kind(parser, &TokenKind::Declaration)? {
+						Some(parse_type(parser)?)
+					} else {
+						None
+					};
 
 				parse_kind(
 					parser,
@@ -666,7 +636,7 @@ fn parse_block(
 
 				parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Let)?;
 
-				statements.push(ast::StatementDef::Declaration(name, expr));
+				statements.push(ast::StatementDef::Declaration(name, type_, expr));
 			}
 			Token {
 				kind: TokenKind::Keyword(Keyword::TypeDef),

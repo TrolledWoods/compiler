@@ -1,16 +1,5 @@
-type Vec3 = [3] {f32, u8};
-
-const main = [x: [[?] f32, f32] -> []] -> [f32] (
-	let x: [?] f32 = { 
-		length: 0,
-		capacity: 500,
-		buffer: alloc[size_of[f32] * 500],
-	};
-
-	let x = 50;
-	let y = [pos: *[3] f32] -> [] (
-		
-	);
+const main = [] (
+	stdout[].print["Hello world!\n"];
 );
 
 

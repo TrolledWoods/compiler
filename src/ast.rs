@@ -213,7 +213,7 @@ impl ExpressionDefKind {
 
 #[derive(Debug)]
 pub enum StatementDef {
-	Declaration(Identifier, ExpressionDef),
+	Declaration(Identifier, Option<TypeDef>, ExpressionDef),
 	Assignment(ExpressionDef, &'static str, ExpressionDef),
 	Expression(ExpressionDef),
 	Block(Vec<StatementDef>),
@@ -223,8 +223,12 @@ impl StatementDef {
 	fn pretty_print(&self, indent: usize) {
 		use StatementDef::*;
 		match self {
-			Declaration(ident, expr) => {
-				print!("let {} = ", ident.data);
+			Declaration(ident, type_, expr) => {
+				print!("let {}", ident.data);
+				if let Some(type_) = type_ {
+					print!(": {}", type_);
+				}
+				print!(" = ");
 				expr.pretty_print(indent);
 			}
 			Assignment(left, expr, right) => {

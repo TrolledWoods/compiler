@@ -301,11 +301,7 @@ fn parse_expression_rec(
 
 					expression = Some(ast::ExpressionDef {
 						kind: ast::ExpressionDefKind::Operator(op, vec![left, right]),
-						pos: SourcePos {
-							file: parser.file,
-							start,
-							end,
-						},
+						pos: source_pos(parser, start, end),
 					});
 				} else {
 					break Ok(expression.unwrap());
@@ -368,21 +364,13 @@ fn parse_non_func_call_value(
 				} else {
 					// An empty block ;D
 					Ok(ast::ExpressionDef {
-						pos: SourcePos {
-							file: parser.file,
-							start,
-							end,
-						},
+						pos: source_pos(parser, start, end),
 						kind: ast::ExpressionDefKind::Block(vec![], None),
 					})
 				}
 			} else {
 				Ok(ast::ExpressionDef {
-					pos: SourcePos {
-						file: parser.file,
-						start,
-						end,
-					},
+					pos: source_pos(parser, start, end),
 					kind: ast::ExpressionDefKind::Block(
 						statements,
 						expression.map(|v| Box::new(v)),
@@ -525,11 +513,7 @@ fn parse_non_func_call_value(
 			parser.eat_token()?;
 			let arg = parse_value(parser, id)?;
 			Ok(ast::ExpressionDef {
-				pos: SourcePos {
-					file: parser.file,
-					start,
-					end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: ast::ExpressionDefKind::UnaryOperator(op, Box::new(arg)),
 			})
 		}
@@ -540,11 +524,7 @@ fn parse_non_func_call_value(
 		}) => {
 			parser.eat_token()?;
 			Ok(ast::ExpressionDef {
-				pos: SourcePos {
-					file: parser.file,
-					start: start,
-					end: end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: ast::ExpressionDefKind::IntLiteral(value),
 			})
 		}
@@ -555,11 +535,7 @@ fn parse_non_func_call_value(
 		}) => {
 			parser.eat_token()?;
 			Ok(ast::ExpressionDef {
-				pos: SourcePos {
-					file: parser.file,
-					start: start,
-					end: end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: ast::ExpressionDefKind::FloatLiteral(value),
 			})
 		}
@@ -570,11 +546,7 @@ fn parse_non_func_call_value(
 		}) => {
 			parser.eat_token()?;
 			Ok(ast::ExpressionDef {
-				pos: SourcePos {
-					file: parser.file,
-					start: start,
-					end: end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: ast::ExpressionDefKind::StringLiteral(value),
 			})
 		}
@@ -586,11 +558,7 @@ fn parse_non_func_call_value(
 			parser.eat_token()?;
 
 			Ok(ast::ExpressionDef {
-				pos: SourcePos {
-					file: parser.file,
-					start: start,
-					end: end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: ast::ExpressionDefKind::Offload(name),
 			})
 		}
@@ -876,14 +844,7 @@ fn parse_named_or_unnamed_list<N, U>(
 			(Some(Token { kind, end, .. }), _) if kind == grammar.end => {
 				// This is the end of the list
 				parser.eat_token()?;
-				return Ok((
-					SourcePos {
-						file: parser.file,
-						start,
-						end,
-					},
-					values,
-				));
+				return Ok((source_pos(parser, start, end), values));
 			}
 			(
 				Some(Token {
@@ -921,11 +882,7 @@ fn parse_named_or_unnamed_list<N, U>(
 				members.push((
 					Identifier {
 						data: name,
-						pos: SourcePos {
-							file: parser.file,
-							start,
-							end,
-						},
+						pos: source_pos(parser, start, end),
 					},
 					value,
 				));
@@ -963,14 +920,7 @@ fn parse_named_or_unnamed_list<N, U>(
 		match parser.eat_token()? {
 			Some(Token { kind, end, .. }) if kind == grammar.end => {
 				parser.eat_token()?;
-				return Ok((
-					SourcePos {
-						file: parser.file,
-						start,
-						end,
-					},
-					values,
-				));
+				return Ok((source_pos(parser, start, end), values));
 			}
 			Some(Token { kind, end, .. }) if kind == grammar.separator => {
 				parser.eat_token()?;
@@ -1062,14 +1012,7 @@ fn parse_list<V>(
 	loop {
 		// Check if the list ended
 		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
-			return Ok((
-				SourcePos {
-					file: parser.file,
-					start,
-					end: terminator.end,
-				},
-				members,
-			));
+			return Ok((source_pos(parser, start, terminator.end), members));
 		}
 
 		// Parse the member
@@ -1077,14 +1020,7 @@ fn parse_list<V>(
 
 		// Check for a separator / list end
 		if let Some(terminator) = try_parse_kind(parser, &grammar.end)? {
-			return Ok((
-				SourcePos {
-					file: parser.file,
-					start,
-					end: terminator.end,
-				},
-				members,
-			));
+			return Ok((source_pos(parser, start, terminator.end), members));
 		} else {
 			parse_kind(parser, &grammar.separator, activity)?;
 		}
@@ -1126,11 +1062,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			let sub_type = parse_type(parser)?;
 
 			Ok(TypeDef {
-				pos: SourcePos {
-					file: parser.file,
-					start,
-					end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: TypeDefKind::ArrayWindow(Box::new(sub_type)),
 			})
 		}
@@ -1144,11 +1076,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			let sub_type = parse_type(parser)?;
 
 			Ok(TypeDef {
-				pos: SourcePos {
-					file: parser.file,
-					start,
-					end,
-				},
+				pos: source_pos(parser, start, end),
 				kind: TypeDefKind::DynamicArray(Box::new(sub_type)),
 			})
 		}
@@ -1181,11 +1109,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 					let sub_type = parse_type(parser)?;
 
 					Ok(TypeDef {
-						pos: SourcePos {
-							file: parser.file,
-							start,
-							end,
-						},
+						pos: source_pos(parser, start, end),
 						kind: TypeDefKind::StaticArray(count, Box::new(sub_type)),
 					})
 				}
@@ -1212,11 +1136,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 					)?;
 
 					Ok(TypeDef {
-						pos: SourcePos {
-							file: parser.file,
-							start: pos.start,
-							end: return_pos.end,
-						},
+						pos: source_pos(parser, pos.start, return_pos.end),
 						kind: TypeDefKind::FunctionPtr(FunctionHeader { args, returns }),
 					})
 				}
@@ -1247,11 +1167,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			parser.eat_token()?;
 			let internal_type = parse_type(parser)?;
 			Ok(TypeDef {
-				pos: SourcePos {
-					file: parser.file,
-					start: start,
-					end: internal_type.pos.end,
-				},
+				pos: source_pos(parser, start, internal_type.pos.end),
 				kind: TypeDefKind::Pointer(Box::new(internal_type)),
 			})
 		}
@@ -1320,14 +1236,7 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		|value| parse_type(value),
 		ParsingActivity::OffloadedType,
 	)? {
-		Some((generics_pos, list)) => (
-			SourcePos {
-				file: parser.file,
-				start: name.pos.start,
-				end: generics_pos.end,
-			},
-			list,
-		),
+		Some((generics_pos, list)) => (source_pos(parser, name.pos.start, generics_pos.end), list),
 		None => (name.pos.clone(), vec![]),
 	};
 
@@ -1335,4 +1244,12 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		pos,
 		kind: TypeDefKind::Offload(name.data),
 	})
+}
+
+fn source_pos(parser: &Parser, start: TextPos, end: TextPos) -> SourcePos {
+	SourcePos {
+		file: parser.file,
+		start,
+		end,
+	}
 }

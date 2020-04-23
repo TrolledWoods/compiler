@@ -258,15 +258,12 @@ pub fn parse_namespace(
 	if !in_block {
 		Ok(())
 	} else {
-		err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: ParsingActivity::Namespace,
-				expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
-				got: None,
-			}
-		)
+		debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: ParsingActivity::Namespace,
+			expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
+			got: None,
+		})
 	}
 }
 
@@ -513,15 +510,12 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				kind: ast::ExpressionDefKind::Offload(name),
 			})
 		}
-		c => err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: ParsingActivity::Expression,
-				expected: vec![ExpectedValue::Expression],
-				got: c,
-			}
-		),
+		c => debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: ParsingActivity::Expression,
+			expected: vec![ExpectedValue::Expression],
+			got: c,
+		}),
 	};
 
 	let mut value = Some(value?);
@@ -646,15 +640,12 @@ fn parse_block(
 		}
 	}
 
-	err!(
-		parser,
-		UnexpectedTokenError {
-			file: parser.file,
-			activity: ParsingActivity::Block,
-			expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
-			got: None,
-		}
-	)
+	debug_err!(UnexpectedTokenError {
+		file: parser.file,
+		activity: ParsingActivity::Block,
+		expected: vec![ExpectedValue::ClosingBracket(BracketKind::Curly)],
+		got: None,
+	})
 }
 
 fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), ParseError> {
@@ -685,15 +676,12 @@ fn parse_kind(
 	let token = parser.eat_token()?;
 	match &token {
 		Some(Token { kind: kind_, .. }) if kind_ == kind => Ok(token.unwrap()),
-		_ => err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: doing,
-				expected: vec![ExpectedValue::Kind(kind.clone())],
-				got: token,
-			}
-		),
+		_ => debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: doing,
+			expected: vec![ExpectedValue::Kind(kind.clone())],
+			got: token,
+		}),
 	}
 }
 
@@ -708,15 +696,12 @@ fn parse_keyword(
 			kind: TokenKind::Keyword(k),
 			..
 		}) if *k == keyword => Ok(token.unwrap()),
-		_ => err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: doing,
-				expected: vec![ExpectedValue::Keyword(keyword)],
-				got: token,
-			}
-		),
+		_ => debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: doing,
+			expected: vec![ExpectedValue::Keyword(keyword)],
+			got: token,
+		}),
 	}
 }
 
@@ -763,15 +748,12 @@ pub fn parse_identifier(
 			data: *name,
 			pos: SourcePos::from_token(&token.unwrap(), parser.file),
 		}),
-		_ => err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: doing,
-				expected: vec![ExpectedValue::Identifier],
-				got: token,
-			}
-		),
+		_ => debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: doing,
+			expected: vec![ExpectedValue::Identifier],
+			got: token,
+		}),
 	}
 }
 
@@ -841,15 +823,12 @@ fn parse_named_or_unnamed_list<N, U>(
 					ListKind::Empty => vec![],
 					ListKind::Named(members) => members,
 					ListKind::Unnamed(_) => {
-						return err!(
-							parser,
-							UnexpectedTokenError {
-								file: parser.file,
-								activity: activity,
-								expected: vec![ExpectedValue::UnnamedListEntry],
-								got: parser.peek_token(0)?,
-							}
-						)
+						return debug_err!(UnexpectedTokenError {
+							file: parser.file,
+							activity: activity,
+							expected: vec![ExpectedValue::UnnamedListEntry],
+							got: parser.peek_token(0)?,
+						})
 					}
 				};
 
@@ -875,15 +854,12 @@ fn parse_named_or_unnamed_list<N, U>(
 					ListKind::Empty => vec![],
 					ListKind::Unnamed(members) => members,
 					ListKind::Named(_) => {
-						return err!(
-							parser,
-							UnexpectedTokenError {
-								file: parser.file,
-								activity: activity,
-								expected: vec![ExpectedValue::NamedListEntry],
-								got: parser.peek_token(0)?,
-							}
-						)
+						return debug_err!(UnexpectedTokenError {
+							file: parser.file,
+							activity: activity,
+							expected: vec![ExpectedValue::NamedListEntry],
+							got: parser.peek_token(0)?,
+						})
 					}
 				};
 
@@ -901,18 +877,15 @@ fn parse_named_or_unnamed_list<N, U>(
 			}
 			Some(Token { kind, end, .. }) if kind == grammar.separator => {}
 			c => {
-				return err!(
-					parser,
-					UnexpectedTokenError {
-						file: parser.file,
-						activity,
-						expected: vec![
-							ExpectedValue::Kind(grammar.end),
-							ExpectedValue::Kind(grammar.separator),
-						],
-						got: c,
-					}
-				);
+				return debug_err!(UnexpectedTokenError {
+					file: parser.file,
+					activity,
+					expected: vec![
+						ExpectedValue::Kind(grammar.end),
+						ExpectedValue::Kind(grammar.separator),
+					],
+					got: c,
+				});
 			}
 		}
 	}
@@ -1150,15 +1123,12 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			kind: TokenKind::Identifier(_),
 			..
 		}) => parse_offloaded_type(parser),
-		c => err!(
-			parser,
-			UnexpectedTokenError {
-				file: parser.file,
-				activity: ParsingActivity::Type,
-				expected: vec![ExpectedValue::Type],
-				got: c,
-			}
-		),
+		c => debug_err!(UnexpectedTokenError {
+			file: parser.file,
+			activity: ParsingActivity::Type,
+			expected: vec![ExpectedValue::Type],
+			got: c,
+		}),
 	}
 }
 

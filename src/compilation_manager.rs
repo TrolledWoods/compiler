@@ -1,14 +1,15 @@
 use crate::ast;
 use crate::error::{CompileError, ErrorPrintingData};
 use crate::id::CIdMap;
+use crate::interpreter::interpret;
 use crate::lexer::SourcePos;
 use crate::namespace::{
 	AllowAmbiguity, NamespaceAccessError, NamespaceError, NamespaceId, NamespaceManager,
 };
 use crate::string_pile::TinyString;
 use crate::types::{
-	self, FunctionHeader, NamedTypeId, ResolvedTypeDef, ResolvedTypeId, ResolvedTypeKind, TypeDef,
-	TypeDefKind,
+	self, FunctionHeader, NamedTypeId, PrimitiveVal, ResolvedTypeDef, ResolvedTypeId,
+	ResolvedTypeKind, TypeDef, TypeDefKind,
 };
 use chashmap::{ReadGuard, WriteGuard};
 use std::collections::{BTreeSet, HashMap};
@@ -134,6 +135,8 @@ pub struct CompileManager {
 
 	pub functions: CIdMap<FunctionId, FunctionCompUnit>,
 
+	pub constants: CIdMap<ConstantId, ConstantCompUnit>,
+
 	pub named_types: CIdMap<NamedTypeId, NamedTypeCompUnit>,
 	pub resolved_types: CIdMap<ResolvedTypeId, ResolvedTypeDef>,
 
@@ -150,6 +153,8 @@ impl CompileManager {
 			ready_to_compile: Mutex::new(vec![]),
 
 			functions: CIdMap::new(),
+
+			constants: CIdMap::new(),
 
 			named_types: CIdMap::new(),
 			resolved_types: CIdMap::new(),
@@ -176,6 +181,12 @@ impl CompileManager {
 				let err = err(window);
 				Err(err)
 			}
+			CompilationUnitId::Constant(id) => {
+				let lock = self.constants.get(id).expect("Invalid FunctionId");
+				let window = lock.get_window();
+				let err = err(window);
+				Err(err)
+			}
 		}
 	}
 
@@ -195,7 +206,73 @@ impl CompileManager {
 				let err = err(window);
 				Err(err)
 			}
+			CompilationUnitId::Constant(id) => {
+				let lock = self.constants.get(id).expect("Invalid FunctionId");
+				let window = lock.get_window();
+				let err = err(window);
+				Err(err)
+			}
 		}
+	}
+
+	pub fn insert_constant(
+		&self,
+		namespace_id: NamespaceId,
+		name: Identifier,
+		def: ast::ExpressionDef,
+		type_def: Option<TypeDef>,
+	) -> Result<ConstantId, NamespaceError> {
+		let comp_unit = ConstantCompUnit {
+			pos: name.pos.clone(),
+			def,
+			type_: TypeRef::None,
+			dependencies: BTreeSet::new(),
+			evaluated: CompUnitStage::unresolved(),
+			stage: ConstantStage::Defined,
+		};
+
+		let id = self.constants.insert(comp_unit);
+
+		println!("Inserted constant compilation unit '{}'", name.data);
+
+		self.namespace_manager.insert_member(
+			namespace_id,
+			name,
+			CompilationUnitId::Constant(id),
+			AllowAmbiguity::Deny,
+		)?;
+
+		if let Some(type_def) = type_def {
+			// Make another compilation unit for our type.
+			// Once this is done we can start compiling
+			// the constant
+			let mut dependants = BTreeSet::new();
+			dependants.insert(CompilationUnitId::Constant(id));
+
+			// TODO: NamedType is misleading, because the type doesn't actually
+			// have to be named. We should change the terminology somehow.
+			// This is going to be necessary to implement aliasing too,
+			// because aliased types will be slightly different from named types,
+			// but we probably want to use the same compilation unit for both.
+			let type_id = self.named_types.insert(NamedTypeCompUnit {
+				definition: type_def,
+				dependencies: BTreeSet::new(),
+				fully_sized: CompUnitStage::Unresolved { dependants },
+				stage: NamedTypeStage::Defined,
+			});
+
+			let mut constant_unit = self.constants.get_mut(id).unwrap();
+			constant_unit
+				.dependencies
+				.insert(CompilationUnitId::NamedType(type_id));
+			constant_unit.type_ = TypeRef::NotDone(type_id);
+
+			self.add_ready_compilation_unit(CompilationUnitId::NamedType(type_id));
+		} else {
+			self.add_ready_compilation_unit(CompilationUnitId::Constant(id));
+		}
+
+		Ok(id)
 	}
 
 	pub fn insert_function(
@@ -231,7 +308,6 @@ impl CompileManager {
 		definition: TypeDef,
 	) -> Result<NamedTypeId, NamespaceError> {
 		let type_id = self.named_types.insert(NamedTypeCompUnit {
-			location: namespace_id,
 			definition,
 			dependencies: BTreeSet::new(),
 			fully_sized: CompUnitStage::unresolved(),
@@ -262,6 +338,106 @@ impl CompileManager {
 		match id {
 			CompilationUnitId::NamedType(type_id) => self.advance_type(type_id)?,
 			CompilationUnitId::Function(id) => self.advance_function(id)?,
+			CompilationUnitId::Constant(id) => self.advance_constant(id)?,
+		}
+
+		Ok(())
+	}
+
+	fn advance_constant(&self, id: ConstantId) -> Result<(), CompileManagerError> {
+		let mut comp_unit = self.constants.get_mut(id).expect("Invalid ConstantId");
+		let ConstantCompUnit {
+			pos,
+			def,
+			type_,
+			dependencies,
+			evaluated,
+			stage,
+		} = &mut comp_unit as &mut ConstantCompUnit;
+
+		match stage {
+			ConstantStage::Poisoned => {
+				unimplemented!("Poisoned constant, deal with this better later")
+			}
+			ConstantStage::Defined => {
+				// Get all the dependencies
+				def.get_dependencies(&mut |dep| {
+					let dependency_id = match dep {
+						Dependency::Name(namespace_id, name) => {
+							let (_dependency_pos, dependency_id) = self
+								.namespace_manager
+								.get_member(namespace_id, name.data)
+								.map_err(|err| {
+									CompileManagerError::dependency_not_in_namespace(
+										err,
+										name.pos.clone(),
+										name.clone(),
+									)
+								})?;
+							dependency_id
+						}
+						Dependency::CompUnit(pos, id) => id,
+					};
+
+					if dependency_id == CompilationUnitId::Constant(id) {
+						// Cannot evaluate a constant that references itself
+						unimplemented!("TODO: Error message for self referencing");
+					}
+
+					match dependency_id {
+						CompilationUnitId::NamedType(dependency_id) => {
+							let mut value = self.named_types.get_mut(dependency_id).unwrap();
+							if value
+								.fully_sized
+								.insert_dependency(CompilationUnitId::Constant(id))
+							{
+								dependencies.insert(CompilationUnitId::NamedType(dependency_id));
+							}
+						}
+						CompilationUnitId::Constant(dependency_id) => {
+							let mut value = self.constants.get_mut(dependency_id).unwrap();
+							if value
+								.evaluated
+								.insert_dependency(CompilationUnitId::Constant(id))
+							{
+								dependencies.insert(CompilationUnitId::Constant(dependency_id));
+							}
+						}
+						CompilationUnitId::Function(dependency_id) => {
+							let mut value = self.functions.get_mut(dependency_id).unwrap();
+							panic!("Function Compilation units aren't powerful enough to depend on them yet");
+						}
+					}
+
+					Ok(())
+				})?;
+
+				*stage = ConstantStage::WaitingForDependencies;
+
+				if dependencies.len() == 0 {
+					std::mem::drop(comp_unit);
+					self.advance_constant(id);
+				}
+			}
+			ConstantStage::WaitingForDependencies => {
+				// Evaluate the value with the interpreter!
+				// Woohoo!
+				*stage = ConstantStage::Poisoned;
+
+				println!("Evaluating with interpreter");
+
+				let wanted_type = match type_ {
+					TypeRef::Resolved(id) => Some(*id),
+					_ => None,
+				};
+
+				let value = interpret(self, &def.as_expression(self)?, wanted_type).unwrap();
+
+				println!("{:?}", value);
+			}
+			// Can't advance the constant if it's already done,
+			// right?
+			ConstantStage::Evaluated => unreachable!(),
 		}
 
 		Ok(())
@@ -271,25 +447,25 @@ impl CompileManager {
 		let mut comp_unit = self.functions.get_mut(id).expect("Invalid FunctionId");
 		let FunctionCompUnit {
 			pos,
-			namespace_id,
 			dependencies,
 			header_names,
 			header,
 			body,
 			typed,
 			stage,
+			..
 		} = &mut comp_unit as &mut FunctionCompUnit;
 
 		match stage {
 			FunctionStage::Defined => {
 				*stage = FunctionStage::Poisoned;
 
-				header.get_dependencies(&mut |dep| {
+				header.get_dependencies(&mut |namespace_id, dep| {
 					println!("{:?}", dep);
 
 					let (_dependency_pos, dependency_id) = self
 						.namespace_manager
-						.get_member(*namespace_id, dep.data)
+						.get_member(namespace_id, dep.data)
 						.map_err(|err| {
 							CompileManagerError::dependency_not_in_namespace(
 								err,
@@ -354,7 +530,6 @@ impl CompileManager {
 			.get_mut(type_id)
 			.expect("Invalid NamedTypeId");
 		let NamedTypeCompUnit {
-			location: namespace_id,
 			stage,
 			dependencies,
 			definition,
@@ -365,10 +540,10 @@ impl CompileManager {
 			NamedTypeStage::Defined => {
 				*stage = NamedTypeStage::Poisoned;
 
-				definition.get_dependencies(&mut |dep| {
+				definition.get_dependencies(&mut |namespace_id, dep| {
 					let (_dependency_pos, dependency_id) = self
 						.namespace_manager
-						.get_member(*namespace_id, dep.data)
+						.get_member(namespace_id, dep.data)
 						.map_err(|err| {
 							CompileManagerError::dependency_not_in_namespace(
 								err,
@@ -470,6 +645,17 @@ impl CompileManager {
 					self.add_ready_compilation_unit(remove_from);
 				}
 			}
+			CompilationUnitId::Constant(id) => {
+				let mut comp_unit = self.constants.get_mut(id).unwrap();
+				assert!(
+					comp_unit.dependencies.remove(&dependency),
+					"Cannot remove a dependency that doesn't exist"
+				);
+
+				if comp_unit.dependencies.len() == 0 {
+					self.add_ready_compilation_unit(remove_from);
+				}
+			}
 		}
 	}
 }
@@ -478,6 +664,66 @@ impl CompileManager {
 pub enum CompilationUnitId {
 	NamedType(NamedTypeId),
 	Function(FunctionId),
+	Constant(ConstantId),
+}
+
+create_id!(ConstantId);
+
+pub enum ConstantValueKind {
+	Collection(Vec<ConstantValueKind>),
+	StaticId(Vec<ConstantValueKind>),
+	Primitive(PrimitiveVal),
+	Pointer(Box<ConstantValueKind>),
+	StaticArray(Vec<ConstantValueKind>),
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub enum ConstantStage {
+	Poisoned,
+	Defined,
+	WaitingForDependencies,
+	Evaluated,
+}
+
+pub struct ConstantCompUnit {
+	pub pos: SourcePos,
+	pub def: ast::ExpressionDef,
+
+	pub type_: TypeRef,
+	pub dependencies: BTreeSet<CompilationUnitId>,
+
+	pub evaluated: CompUnitStage<(ResolvedTypeId, ConstantValueKind)>,
+	pub stage: ConstantStage,
+}
+
+impl CompUnit for ConstantCompUnit {
+	type Stage = ConstantStage;
+
+	fn get_window_mut<'a>(&'a mut self) -> CompUnitWindowMut<'a> {
+		CompUnitWindowMut {
+			pos: self.pos.clone(),
+			dependencies: &mut self.dependencies,
+		}
+	}
+
+	fn get_window<'a>(&'a self) -> CompUnitWindow<'a> {
+		CompUnitWindow {
+			pos: self.pos.clone(),
+			dependencies: &self.dependencies,
+		}
+	}
+
+	fn get_stage_dependants_mut<'a>(
+		&'a mut self,
+		stage: Self::Stage,
+	) -> Option<&'a mut BTreeSet<CompilationUnitId>> {
+		match stage {
+			ConstantStage::Poisoned => None,
+			ConstantStage::Defined => None,
+			ConstantStage::WaitingForDependencies => None,
+			ConstantStage::Evaluated => self.evaluated.get_dependants_mut(),
+		}
+	}
 }
 
 create_id!(FunctionId);
@@ -545,7 +791,6 @@ pub enum NamedTypeStage {
 }
 
 pub struct NamedTypeCompUnit {
-	pub location: NamespaceId,
 	pub definition: TypeDef,
 	pub dependencies: BTreeSet<CompilationUnitId>,
 
@@ -660,5 +905,11 @@ pub struct Identifier {
 
 pub enum Dependency {
 	CompUnit(SourcePos, CompilationUnitId),
-	Name(Identifier),
+	Name(NamespaceId, Identifier),
+}
+
+pub enum TypeRef {
+	None,
+	NotDone(NamedTypeId),
+	Resolved(ResolvedTypeId),
 }

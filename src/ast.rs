@@ -2,7 +2,6 @@ use crate::compilation_manager::{
 	CompilationUnitId, CompileManager, CompileManagerError, Dependency, FunctionId, Identifier,
 };
 use crate::lexer::{Literal, SourcePos};
-use crate::misc::fail_collect;
 use crate::namespace::NamespaceId;
 use crate::parser::ListKind;
 use crate::string_pile::TinyString;
@@ -85,8 +84,10 @@ impl ExpressionDef {
 			Function(id) => ExpressionKind::Function(*id),
 			Offload(name, namespace_id) => ExpressionKind::Offload(*name, *namespace_id),
 			Array(members) => {
-				let members =
-					fail_collect(members.into_iter().map(|arg| arg.as_expression(manager)))?;
+				let members = members
+					.into_iter()
+					.map(|arg| arg.as_expression(manager))
+					.collect::<Result<Vec<_>, _>>()?;
 				ExpressionKind::Array(members)
 			}
 			Collection(kind) => match kind {
@@ -173,10 +174,13 @@ impl ExpressionDef {
 				}
 			},
 			Offload(name, namespace_id) => {
-				on_find_dep(Dependency::Name(Identifier {
-					data: *name,
-					pos: self.pos.clone(),
-				}))?;
+				on_find_dep(Dependency::Name(
+					*namespace_id,
+					Identifier {
+						data: *name,
+						pos: self.pos.clone(),
+					},
+				))?;
 			}
 			Literal(_) => (),
 			Block(_, _) => unimplemented!(),

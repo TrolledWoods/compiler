@@ -16,14 +16,17 @@ pub struct TypeDef {
 impl TypeDef {
 	pub fn get_unsized_dependencies<E>(
 		&self,
-		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+		mut on_find_dependency: &mut impl FnMut(NamespaceId, Identifier) -> Result<(), E>,
 	) -> Result<(), E> {
 		use TypeDefKind::*;
 		match &self.kind {
-			Offload(name, namespace_id) => on_find_dependency(Identifier {
-				data: *name,
-				pos: self.pos.clone(),
-			})?,
+			Offload(name, namespace_id) => on_find_dependency(
+				*namespace_id,
+				Identifier {
+					data: *name,
+					pos: self.pos.clone(),
+				},
+			)?,
 			Tuple(members) => {
 				for member in members {
 					member.get_unsized_dependencies(on_find_dependency)?;
@@ -49,14 +52,17 @@ impl TypeDef {
 
 	pub fn get_dependencies<E>(
 		&self,
-		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+		mut on_find_dependency: &mut impl FnMut(NamespaceId, Identifier) -> Result<(), E>,
 	) -> Result<(), E> {
 		use TypeDefKind::*;
 		match &self.kind {
-			Offload(name, namespace_id) => on_find_dependency(Identifier {
-				data: *name,
-				pos: self.pos.clone(),
-			})?,
+			Offload(name, namespace_id) => on_find_dependency(
+				*namespace_id,
+				Identifier {
+					data: *name,
+					pos: self.pos.clone(),
+				},
+			)?,
 			Tuple(members) => {
 				for member in members {
 					member.get_unsized_dependencies(on_find_dependency)?;
@@ -166,6 +172,20 @@ pub enum ResolvedTypeKind {
 	DynamicArray,
 }
 
+#[derive(Debug)]
+pub enum PrimitiveVal {
+	I8(i8),
+	I16(i16),
+	I32(i32),
+	I64(i64),
+	U8(u8),
+	U16(u16),
+	U32(u32),
+	U64(u64),
+	F32(f32),
+	F64(f64),
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum PrimitiveKind {
 	I8,
@@ -207,7 +227,7 @@ pub struct FunctionHeader<T> {
 impl FunctionHeader<TypeDef> {
 	pub fn get_unsized_dependencies<E>(
 		&self,
-		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+		mut on_find_dependency: &mut impl FnMut(NamespaceId, Identifier) -> Result<(), E>,
 	) -> Result<(), E> {
 		for member in &self.args {
 			member.get_unsized_dependencies(on_find_dependency)?;
@@ -222,7 +242,7 @@ impl FunctionHeader<TypeDef> {
 
 	pub fn get_dependencies<E>(
 		&self,
-		mut on_find_dependency: &mut impl FnMut(Identifier) -> Result<(), E>,
+		mut on_find_dependency: &mut impl FnMut(NamespaceId, Identifier) -> Result<(), E>,
 	) -> Result<(), E> {
 		for member in &self.args {
 			member.get_dependencies(on_find_dependency)?;
@@ -271,6 +291,23 @@ pub struct ResolvedTypeDef {
 	pub size: usize,
 	pub align: usize,
 	pub kind: ResolvedTypeKind,
+}
+
+impl ResolvedTypeDef {
+	pub fn primitive(manager: &CompileManager, primitive: PrimitiveKind) -> ResolvedTypeId {
+		let (size, align) = primitive.get_size_and_align();
+
+		let id = insert_resolved_type(
+			manager,
+			ResolvedTypeDef {
+				size,
+				align,
+				kind: ResolvedTypeKind::Primitive(primitive),
+			},
+		);
+
+		id
+	}
 }
 
 /// Inserts a resolved and "finished" type
@@ -328,6 +365,9 @@ pub fn size_type_def(
 				}
 				CompilationUnitId::Function(_) => {
 					panic!("TODO: A type cannot depend on a function!")
+				}
+				CompilationUnitId::Constant(_) => {
+					panic!("TODO: A type cannot depend on a constant!")
 				}
 			};
 

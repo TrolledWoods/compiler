@@ -1,6 +1,4 @@
-type Hi = { x: f32, y: f32, epic: [3] More };
-
-type More = { f32, f64 };
+const HELLO: f32 = (0.7 + 0.2) / 0.1;
 
 // const main = [] -> [{Hi2, Hi}] (
 //	let x: f32 = 500.0 + "hi" * 50 % (

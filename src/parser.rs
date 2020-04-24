@@ -629,6 +629,10 @@ fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), Pa
 
 	let identifier = parse_identifier(parser, ParsingActivity::Constant)?;
 
+	parse_kind(parser, &TokenKind::Declaration, ParsingActivity::Constant)?;
+
+	let type_def = parse_type(parser, id)?;
+
 	parse_kind(
 		parser,
 		&TokenKind::AssignmentOperator(""),
@@ -640,6 +644,10 @@ fn parse_constant_def(parser: &mut Parser<'_>, id: NamespaceId) -> Result<(), Pa
 	println!("");
 
 	parse_kind(parser, &TokenKind::Terminator, ParsingActivity::Constant)?;
+
+	parser
+		.manager
+		.insert_constant(id, identifier, expression, Some(type_def));
 
 	Ok(())
 }

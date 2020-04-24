@@ -21,6 +21,7 @@ mod ast;
 mod compilation_manager;
 mod debug_printing;
 mod error;
+mod interpreter;
 mod keyword;
 mod lexer;
 mod misc;

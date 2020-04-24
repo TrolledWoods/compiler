@@ -20,11 +20,11 @@ pub type Dependencies = Vec<(TinyString, Vec<SourcePos>)>;
 pub enum CompileManagerError {
 	UndefinedDependency {
 		dependant: SourcePos,
-		dependency: (TinyString, Vec<SourcePos>),
+		dependency: Identifier,
 	},
 	AmbiguousDependency {
 		dependant: SourcePos,
-		dependency: (TinyString, Vec<SourcePos>),
+		dependency: Identifier,
 		defined: Vec<Identifier>,
 	},
 	ExpectedType {
@@ -42,9 +42,8 @@ impl CompileManagerError {
 	pub fn dependency_not_in_namespace(
 		error: NamespaceAccessError,
 		dependant: SourcePos,
-		// dependency: (TinyString, Vec<SourcePos>),
+		dependency: Identifier,
 	) -> CompileManagerError {
-		let dependency = ("".into(), Vec::new());
 		match error {
 			NamespaceAccessError::DoesNotExist => CompileManagerError::UndefinedDependency {
 				dependant,
@@ -71,27 +70,31 @@ impl CompileError for CompileManagerError {
 		match self {
 			UndefinedDependency {
 				dependant,
-				dependency: (depending_on, deps),
+				dependency: Identifier {
+					data: depending_on,
+					pos: dep_pos,
+				},
 			} => {
 				let mut error = ErrorPrintingData::new(format!(
 					"Item cannot be compiled because it depends on '{}', which doesn't exist",
 					depending_on
 				))
-				.problem(dependant, format!("invalid dependency in this value"));
-				add_dependencies(&mut error, deps);
+				.problem(dep_pos, format!("This value doesn't exist"));
 				error
 			}
 			AmbiguousDependency {
 				dependant,
-				dependency: (depending_on, deps),
+				dependency: Identifier {
+					data: depending_on,
+					pos: dep_pos,
+				},
 				defined,
 			} => {
 				let mut error = ErrorPrintingData::new(format!(
 					"Item cannot be compiled because it depends on '{}', which is ambiguous",
 					depending_on
 				))
-				.problem(dependant, format!("invalid dependency in this value"));
-				add_dependencies(&mut error, deps);
+				.problem(dep_pos, format!("This value doesn't exist"));
 				error
 			}
 			ExpectedType { pos, reference_pos } => ErrorPrintingData::new(format!(
@@ -288,7 +291,11 @@ impl CompileManager {
 						.namespace_manager
 						.get_member(*namespace_id, dep.data)
 						.map_err(|err| {
-							CompileManagerError::dependency_not_in_namespace(err, pos.clone())
+							CompileManagerError::dependency_not_in_namespace(
+								err,
+								pos.clone(),
+								dep.clone(),
+							)
 						})?;
 
 					let (_, mut named_type) =
@@ -311,14 +318,18 @@ impl CompileManager {
 					Ok(())
 				})?;
 
-				*stage = FunctionStage::Typed;
+				*stage = FunctionStage::WaitingForTyping;
 
 				println!("Sent off dependencies for function header types!");
 
 				if dependencies.len() == 0 {
+					// Make sure to not get a lock-block
 					std::mem::drop(comp_unit);
 					self.advance_function(id);
 				}
+			}
+			FunctionStage::WaitingForTyping => {
+				*stage = FunctionStage::Poisoned;
 			}
 			_ => unimplemented!(),
 		}
@@ -353,6 +364,7 @@ impl CompileManager {
 							CompileManagerError::dependency_not_in_namespace(
 								err,
 								definition.pos.clone(),
+								dep.clone(),
 							)
 						})?;
 

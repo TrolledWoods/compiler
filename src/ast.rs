@@ -1,11 +1,46 @@
-use crate::compilation_manager::{CompilationUnitId, Dependency, FunctionId, Identifier};
+use crate::compilation_manager::{
+	CompilationUnitId, CompileManager, CompileManagerError, Dependency, FunctionId, Identifier,
+};
 use crate::lexer::{Literal, SourcePos};
+use crate::misc::fail_collect;
+use crate::namespace::NamespaceId;
 use crate::parser::ListKind;
 use crate::string_pile::TinyString;
-use crate::types::TypeDef;
+use crate::types::{ResolvedTypeId, TypeDef};
 
 fn print_indent(indent: usize) {
 	(0..indent).for_each(|_| print!("| "));
+}
+
+#[derive(Debug)]
+pub struct Expression {
+	pub pos: SourcePos,
+	pub kind: ExpressionKind,
+}
+
+#[derive(Debug)]
+pub enum ExpressionKind {
+	Operator(&'static str, Vec<Expression>),
+	UnaryOperator(&'static str, Box<Expression>),
+	FunctionCall {
+		function: Box<Expression>,
+		args: Vec<Expression>,
+	},
+	Function(FunctionId),
+	Offload(TinyString, NamespaceId),
+	Array(Vec<Expression>),
+	Collection(ListKind<Expression, Expression>),
+
+	Literal(Literal),
+	Block(Vec<Statement>, Option<Box<Expression>>),
+}
+
+#[derive(Debug)]
+pub enum Statement {
+	Declaration(Identifier, ResolvedTypeId, Expression),
+	Assignment(Expression, &'static str, Expression),
+	Expression(Expression),
+	Block(Vec<Statement>),
 }
 
 #[derive(Debug)]
@@ -17,6 +52,81 @@ pub struct ExpressionDef {
 impl ExpressionDef {
 	pub fn pretty_print(&self, indent: usize) {
 		self.kind.pretty_print(indent);
+	}
+
+	pub fn as_expression(
+		&self,
+		manager: &CompileManager,
+	) -> Result<Expression, CompileManagerError> {
+		use ExpressionDefKind::*;
+		let new_kind = match &self.kind {
+			Operator(op, args) => {
+				let mut new_args = Vec::with_capacity(args.len());
+				for arg in args {
+					new_args.push(arg.as_expression(manager)?);
+				}
+
+				ExpressionKind::Operator(op, new_args)
+			}
+			UnaryOperator(op, arg) => {
+				ExpressionKind::UnaryOperator(op, Box::new(arg.as_expression(manager)?))
+			}
+			FunctionCall { function, args } => {
+				let mut new_args = Vec::with_capacity(args.len());
+				for arg in args {
+					new_args.push(arg.as_expression(manager)?);
+				}
+
+				ExpressionKind::FunctionCall {
+					function: Box::new(function.as_expression(manager)?),
+					args: new_args,
+				}
+			}
+			Function(id) => ExpressionKind::Function(*id),
+			Offload(name, namespace_id) => ExpressionKind::Offload(*name, *namespace_id),
+			Array(members) => {
+				let members =
+					fail_collect(members.into_iter().map(|arg| arg.as_expression(manager)))?;
+				ExpressionKind::Array(members)
+			}
+			Collection(kind) => match kind {
+				ListKind::Empty => ExpressionKind::Collection(ListKind::Empty),
+				ListKind::Named(elements) => {
+					let elements: Vec<_> = elements
+						.into_iter()
+						.map(|(name, arg)| Ok((name.clone(), arg.as_expression(manager)?)))
+						.collect::<Result<Vec<_>, _>>()?;
+					ExpressionKind::Collection(ListKind::Named(elements))
+				}
+				ListKind::Unnamed(elements) => {
+					let elements: Vec<_> = elements
+						.into_iter()
+						.map(|arg| arg.as_expression(manager))
+						.collect::<Result<Vec<_>, _>>()?;
+					ExpressionKind::Collection(ListKind::Unnamed(elements))
+				}
+			},
+			Literal(literal) => ExpressionKind::Literal(literal.clone()),
+			Block(statements, returns) => {
+				let statements = statements
+					.into_iter()
+					.map(|def| def.as_statement(manager))
+					.collect::<Result<Vec<_>, _>>()?;
+
+				let returns = match returns {
+					Some(value) => Some(Box::new(value.as_expression(manager)?)),
+					None => None,
+				};
+
+				ExpressionKind::Block(statements, returns)
+			}
+			_ => unimplemented!(),
+		};
+
+		Ok(Expression {
+			pos: self.pos.clone(),
+			kind: new_kind,
+		})
 	}
 
 	pub fn get_dependencies<E>(
@@ -62,7 +172,7 @@ impl ExpressionDef {
 					}
 				}
 			},
-			Offload(name) => {
+			Offload(name, namespace_id) => {
 				on_find_dep(Dependency::Name(Identifier {
 					data: *name,
 					pos: self.pos.clone(),
@@ -85,7 +195,7 @@ pub enum ExpressionDefKind {
 		args: Vec<ExpressionDef>,
 	},
 	Function(FunctionId),
-	Offload(TinyString),
+	Offload(TinyString, NamespaceId),
 	Array(Vec<ExpressionDef>),
 	Collection(ListKind<ExpressionDef, ExpressionDef>),
 
@@ -110,7 +220,7 @@ impl ExpressionDefKind {
 				print!("unary {} ", kind);
 				arg.pretty_print(indent);
 			}
-			Offload(name) => print!("{}", name),
+			Offload(name, id) => print!("{:?}'{}'", id, name),
 			Array(members) => {
 				print!("[");
 				for member in members {
@@ -197,6 +307,18 @@ pub enum StatementDef {
 }
 
 impl StatementDef {
+	fn as_statement(&self, manager: &CompileManager) -> Result<Statement, CompileManagerError> {
+		use StatementDef::*;
+		match self {
+			Declaration(name, ty, expression) => {
+				let ty = ty.as_ref().expect("We don't support type inference yet");
+
+				unimplemented!();
+			}
+			_ => unimplemented!(),
+		}
+	}
+
 	fn pretty_print(&self, indent: usize) {
 		use StatementDef::*;
 		match self {

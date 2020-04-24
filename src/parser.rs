@@ -352,7 +352,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 				parser,
 				ListGrammar::square(),
 				|parser| parse_expression(parser, id),
-				parse_type,
+				|parser| parse_type(parser, id),
 				ParsingActivity::Block,
 			)?;
 
@@ -377,7 +377,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 						let (_, returns) = parse_list(
 							parser,
 							ListGrammar::square(),
-							|parser| parse_type(parser),
+							|parser| parse_type(parser, id),
 							ParsingActivity::Block,
 						)?;
 
@@ -475,7 +475,7 @@ fn parse_value(parser: &mut Parser<'_>, id: NamespaceId) -> Result<ast::Expressi
 
 			Ok(ast::ExpressionDef {
 				pos: source_pos(parser, start, end),
-				kind: ast::ExpressionDefKind::Offload(name),
+				kind: ast::ExpressionDefKind::Offload(name, id),
 			})
 		}
 		c => debug_err!(UnexpectedTokenError {
@@ -541,7 +541,7 @@ fn parse_block(
 
 				let type_ =
 					if let Some(declaration) = try_parse_kind(parser, &TokenKind::Declaration)? {
-						Some(parse_type(parser)?)
+						Some(parse_type(parser, id)?)
 					} else {
 						None
 					};
@@ -749,7 +749,7 @@ pub fn parse_type_def(
 		ParsingActivity::TypeDef,
 	)?;
 
-	let type_def = parse_type(parser)?;
+	let type_def = parse_type(parser, namespace_id)?;
 	parser
 		.manager
 		.insert_named_type(namespace_id, identifier, type_def)?;
@@ -991,12 +991,15 @@ fn parse_list<V>(
 	}
 }
 
-fn parse_collection(parser: &mut Parser) -> Result<(SourcePos, CollectionDefKind), ParseError> {
+fn parse_collection(
+	parser: &mut Parser,
+	id: NamespaceId,
+) -> Result<(SourcePos, CollectionDefKind), ParseError> {
 	let (pos, members) = parse_named_or_unnamed_list(
 		parser,
 		ListGrammar::curly(),
-		parse_type,
-		parse_type,
+		|parser| parse_type(parser, id),
+		|parser| parse_type(parser, id),
 		ParsingActivity::StructMember,
 	)?;
 
@@ -1014,7 +1017,7 @@ fn parse_collection(parser: &mut Parser) -> Result<(SourcePos, CollectionDefKind
 	}
 }
 
-fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+fn parse_type(parser: &mut Parser, id: NamespaceId) -> Result<TypeDef, ParseError> {
 	match parser.peek_token(0)? {
 		Some(Token {
 			kind: TokenKind::ArrayWindow,
@@ -1023,7 +1026,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		}) => {
 			// This is an array window
 			parser.eat_token()?;
-			let sub_type = parse_type(parser)?;
+			let sub_type = parse_type(parser, id)?;
 
 			Ok(TypeDef {
 				pos: source_pos(parser, start, end),
@@ -1037,7 +1040,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		}) => {
 			// This is a dynamic array!
 			parser.eat_token()?;
-			let sub_type = parse_type(parser)?;
+			let sub_type = parse_type(parser, id)?;
 
 			Ok(TypeDef {
 				pos: source_pos(parser, start, end),
@@ -1070,7 +1073,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 						}
 					};
 
-					let sub_type = parse_type(parser)?;
+					let sub_type = parse_type(parser, id)?;
 
 					Ok(TypeDef {
 						pos: source_pos(parser, start, end),
@@ -1082,7 +1085,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 					let (pos, args) = parse_list(
 						parser,
 						ListGrammar::square(),
-						|parser| parse_type(parser),
+						|parser| parse_type(parser, id),
 						ParsingActivity::FunctionPtr,
 					)?;
 
@@ -1095,7 +1098,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 					let (return_pos, returns) = parse_list(
 						parser,
 						ListGrammar::square(),
-						|parser| parse_type(parser),
+						|parser| parse_type(parser, id),
 						ParsingActivity::FunctionPtr,
 					)?;
 
@@ -1110,7 +1113,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			kind: TokenKind::Bracket('{'),
 			..
 		}) => {
-			let (pos, collection) = parse_collection(parser)?;
+			let (pos, collection) = parse_collection(parser, id)?;
 
 			match collection {
 				CollectionDefKind::Unnamed(members) => Ok(TypeDef {
@@ -1129,7 +1132,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 			..
 		}) => {
 			parser.eat_token()?;
-			let internal_type = parse_type(parser)?;
+			let internal_type = parse_type(parser, id)?;
 			Ok(TypeDef {
 				pos: source_pos(parser, start, internal_type.pos.end),
 				kind: TypeDefKind::Pointer(Box::new(internal_type)),
@@ -1138,7 +1141,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 		Some(Token {
 			kind: TokenKind::Identifier(_),
 			..
-		}) => parse_offloaded_type(parser),
+		}) => parse_offloaded_type(parser, id),
 		c => debug_err!(UnexpectedTokenError {
 			file: parser.file,
 			activity: ParsingActivity::Type,
@@ -1148,22 +1151,7 @@ fn parse_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 	}
 }
 
-fn parse_tuple_type(
-	parser: &mut Parser,
-
-	dependencies: &mut Dependencies,
-) -> Result<(SourcePos, Vec<TypeDef>), ParseError> {
-	let (pos, members) = parse_list(
-		parser,
-		ListGrammar::parenthesis(),
-		|value| parse_type(value),
-		ParsingActivity::Tuple,
-	)?;
-
-	Ok((pos, members))
-}
-
-fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
+fn parse_offloaded_type(parser: &mut Parser, id: NamespaceId) -> Result<TypeDef, ParseError> {
 	let name = parse_identifier(parser, ParsingActivity::OffloadedType)?;
 
 	// See if it's a primitive
@@ -1194,7 +1182,7 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 	let (pos, generics) = match try_parse_list(
 		parser,
 		ListGrammar::angle(),
-		|value| parse_type(value),
+		|value| parse_type(value, id),
 		ParsingActivity::OffloadedType,
 	)? {
 		Some((generics_pos, list)) => (source_pos(parser, name.pos.start, generics_pos.end), list),
@@ -1203,7 +1191,7 @@ fn parse_offloaded_type(parser: &mut Parser) -> Result<TypeDef, ParseError> {
 
 	Ok(TypeDef {
 		pos,
-		kind: TypeDefKind::Offload(name.data),
+		kind: TypeDefKind::Offload(name.data, id),
 	})
 }
 

@@ -20,7 +20,7 @@ impl TypeDef {
 	) -> Result<(), E> {
 		use TypeDefKind::*;
 		match &self.kind {
-			Offload(name) => on_find_dependency(Identifier {
+			Offload(name, namespace_id) => on_find_dependency(Identifier {
 				data: *name,
 				pos: self.pos.clone(),
 			})?,
@@ -53,7 +53,7 @@ impl TypeDef {
 	) -> Result<(), E> {
 		use TypeDefKind::*;
 		match &self.kind {
-			Offload(name) => on_find_dependency(Identifier {
+			Offload(name, namespace_id) => on_find_dependency(Identifier {
 				data: *name,
 				pos: self.pos.clone(),
 			})?,
@@ -91,7 +91,7 @@ pub enum CollectionDefKind {
 }
 
 pub enum TypeDefKind {
-	Offload(TinyString),
+	Offload(TinyString, NamespaceId),
 	Pointer(Box<TypeDef>),
 	Tuple(Vec<TypeDef>),
 	FunctionPtr(FunctionHeader<TypeDef>),
@@ -112,7 +112,7 @@ impl Display for TypeDefKind {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		use TypeDefKind::*;
 		match self {
-			Offload(reference) => {
+			Offload(reference, _namespace_id) => {
 				write!(f, "{}<", &reference)?;
 
 				write!(f, ">")?;
@@ -305,15 +305,14 @@ pub fn insert_resolved_type(
 /// It may add more ResolvedTypes(should probably rename that to SizedType or smth)
 pub fn size_type_def(
 	manager: &CompileManager,
-	namespace_id: NamespaceId,
 	type_def: &TypeDef,
 	recursion_guard: NamedTypeId,
 ) -> Result<(usize, usize, ResolvedTypeId), CompileManagerError> {
 	match &type_def.kind {
-		TypeDefKind::Offload(reference) => {
+		TypeDefKind::Offload(reference, namespace_id) => {
 			let (member_pos, id) = manager
 				.namespace_manager
-				.get_member(namespace_id, *reference)
+				.get_member(*namespace_id, *reference)
 				.unwrap();
 
 			let (named_type_id, named_type) = match id {
@@ -370,7 +369,7 @@ pub fn size_type_def(
 		}
 		TypeDefKind::StaticArray(count, contents) => {
 			let (content_size, content_align, content_id) =
-				size_type_def(manager, namespace_id, contents, recursion_guard)?;
+				size_type_def(manager, contents, recursion_guard)?;
 
 			let (size, align) = {
 				if content_size == 0 {
@@ -405,7 +404,7 @@ pub fn size_type_def(
 			let mut align = 0;
 			for member in members {
 				let (member_size, member_align, new_member) =
-					size_type_def(manager, namespace_id, member, recursion_guard)?;
+					size_type_def(manager, member, recursion_guard)?;
 				// :^> best align system ever!!!
 				if member_align != 0 {
 					if member_align >= align {
@@ -438,7 +437,7 @@ pub fn size_type_def(
 
 			for (name, member) in members {
 				let (member_size, member_align, new_member) =
-					size_type_def(manager, namespace_id, member, recursion_guard)?;
+					size_type_def(manager, member, recursion_guard)?;
 				// :^> best align system ever!!!
 				if member_align != 0 {
 					if member_align >= align {

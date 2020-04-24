@@ -1,27 +1,29 @@
-type Hi = { x: f32, y: f32, epic: *Hi };
+type Hi = { x: f32, y: f32, epic: [3] More };
 
-const main = [] -> [{Hi2, Hi}] (
-	let x: f32 = 500.0 + "hi" * 50 % (
-		const other = 20;
+type More = { f32, f64 };
 
-		let y = ("hi"; "yes"; "you");
-
-		y
-	);
-
-x[][][][]["hi", "you", "suck" + 50 - (hi)][][{}];
-
-
-	{ x: 30, y: 50, z: 5000000 };
-
-	x + y * (
-		"hello" * (
-			"hello" * (
-				"hello" * 3
-			)
-		)
-	) * 500
-);
+// const main = [] -> [{Hi2, Hi}] (
+//	let x: f32 = 500.0 + "hi" * 50 % (
+//		const other = 20;
+//
+//		let y = ("hi"; "yes"; "you");
+//
+//		y
+//	);
+//
+//x[][][][]["hi", "you", "suck" + 50 - (hi)][][{}];
+//
+//
+//	{ x: 30, y: 50, z: 5000000 };
+//
+//	x + y * (
+//		"hello" * (
+//			"hello" * (
+//				"hello" * 3
+//			)
+//		)
+//	) * 500
+// );
 
 
 

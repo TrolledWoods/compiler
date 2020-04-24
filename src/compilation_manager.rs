@@ -329,6 +329,15 @@ impl CompileManager {
 				}
 			}
 			FunctionStage::WaitingForTyping => {
+				*stage = FunctionStage::Typed;
+
+				// TODO: Implement body dependencies
+
+				// Make sure to not get a lock-block
+				std::mem::drop(comp_unit);
+				self.advance_function(id);
+			}
+			FunctionStage::Typed => {
 				*stage = FunctionStage::Poisoned;
 			}
 			_ => unimplemented!(),
@@ -410,8 +419,7 @@ impl CompileManager {
 				// This is only fine because we know that
 				// all our dependencies on other named types
 				// are resolved.
-				let (size, align, resolved_id) =
-					types::size_type_def(self, *namespace_id, definition, type_id)?;
+				let (size, align, resolved_id) = types::size_type_def(self, definition, type_id)?;
 
 				let dependants =
 					std::mem::replace(fully_sized, CompUnitStage::Done((size, align, resolved_id)));
